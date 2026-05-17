@@ -1,0 +1,18 @@
+network         = "DEVICES", { device }, 
+                  "CONNECT", { connect }, 
+                  "MONITOR", { monitor }, 
+                  "END", ";" ;
+
+device          = name_list, "=", device_kind, ";" ;
+name_list       = name, { ",", name } ;
+device_kind     = ( "AND" | "NAND" | "OR" | "NOR" | "CLOCK" | "SWITCH" ), "(", number, ")" 
+                | "DTYPE" | "XOR" ;
+
+connect         = signal, { ",", signal }, "=", signal, ";" ;
+signal          = name, [ ".", name ] ;
+
+monitor         = signal, { ",", signal }, ";" ;
+
+(* These lexical tokens are handled by the scanner *)
+name          = letter , { letter | digit } ;
+number        = digit , { digit } ;
