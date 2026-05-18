@@ -1,10 +1,10 @@
 network         = "DEVICES", { device }, 
                   "CONNECT", { connect }, 
-                  "MONITOR", { monitor };
+                  "MONITOR", { monitor } ;
 
 device          = name_list, "=", device_kind, ";" ;
 name_list       = name, { ",", name } ;
-device_kind     = parameterised_device, "(", number, ")" | fixed_device
+device_kind     = parameterised_device, "(", number, ")" | fixed_device ;
 
 
 parameterised_device = "AND" | "NAND" | "OR" | "NOR" | "CLOCK" | "SWITCH" ;
