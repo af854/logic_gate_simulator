@@ -1,7 +1,6 @@
 network         = "DEVICES", { device }, 
                   "CONNECT", { connect }, 
-                  "MONITOR", { monitor }, 
-                  "END", ";" ;
+                  "MONITOR", { monitor };
 
 device          = name_list, "=", device_kind, ";" ;
 name_list       = name, { ",", name } ;
