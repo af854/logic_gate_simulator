@@ -10,7 +10,7 @@ device_kind     = parameterised_device, "(", number, ")" | fixed_device
 parameterised_device = "AND" | "NAND" | "OR" | "NOR" | "CLOCK" | "SWITCH" ;
 fixed_device = "DTYPE" | "XOR" ;
 
-connect = input_signal_list, "->", output_signal, ";" ;
+connect = input_signal_list, "<-", output_signal, ";" ;
 
 input_signal_list = input_signal, { ",", input_signal } ;
 
