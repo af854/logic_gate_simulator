@@ -6,3 +6,6 @@
 !logsim/**
 
 !.gitignore
+
+__pycache__/
+*.pyc
