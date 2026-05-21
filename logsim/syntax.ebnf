@@ -1,0 +1,40 @@
+network_file         = { module }, network ;
+
+network              = { module },
+                       "DEVICES", { device },
+                       [ "NETS", { net } ],
+                       "CONNECT", { connect },
+                       "MONITOR", { monitor } ;
+
+module               = "MODULE", name,
+                       "INPUTS", name_list, ";",
+                       "OUTPUTS", name_list, ";",
+                       "DEVICES", { device },
+                       [ "NETS", { net } ],
+                       "CONNECT", { connect },
+                       "ENDMODULE" ;
+
+device               = name_list, "=", device_kind, ";" ;
+name_list            = name, { ",", name } ;
+
+device_kind          = parameterised_device, "(", number, ")" 
+                     | fixed_device 
+                     | module_device ;
+
+parameterised_device = "AND" | "NAND" | "OR" | "NOR" | "CLOCK" | "SWITCH" ;
+fixed_device         = "DTYPE" | "XOR" ;
+module_device        = name ;
+
+net                  = name, ";" ;
+
+connect              = signal, "=", source, ";" ;
+source               = signal | literal ;
+
+monitor              = signal, { ",", signal }, ";" ;
+
+signal               = name, [ ".", name ] ;
+literal              = "0" | "1" ;
+
+(* Lexical tokens handled by the scanner *)
+name                 = letter, { letter | digit | "_" } ;
+number               = digit, { digit } ;
