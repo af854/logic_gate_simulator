@@ -3,13 +3,11 @@
 Used in the Logic Simulator project to comprehensively test the Scanner
 and Symbol classes using pytest.
 
-Tests cover initialization, file handling, lexical tokenization (punctuation,
-numbers, keywords, user names), comment/whitespace skipping, line tracking,
-and error reporting.
+Tests cover initialization, file handling, regex-based lexical tokenization,
+line coordinate tracking via bisection, and error reporting padding.
 """
 
 import pytest
-
 from names import Names
 from scanner import Scanner, Symbol
 
@@ -37,7 +35,7 @@ def create_definition_file(tmp_path):
 
     def _create_file(content):
         file_path = tmp_path / "test_def.txt"
-        file_path.write_text(content)
+        file_path.write_text(content, encoding="utf-8")
         return str(file_path)
 
     return _create_file
@@ -101,6 +99,7 @@ def test_scanner_numbers(new_names, create_definition_file):
     "keyword",
     [
         "DEVICES",
+        "NETS",
         "CONNECT",
         "MONITOR",
         "AND",
@@ -111,6 +110,10 @@ def test_scanner_numbers(new_names, create_definition_file):
         "SWITCH",
         "DTYPE",
         "XOR",
+        "MODULE",
+        "INPUTS",
+        "OUTPUTS",
+        "ENDMODULE",
     ],
 )
 def test_scanner_keywords(new_names, create_definition_file, keyword):
@@ -125,6 +128,7 @@ def test_scanner_keywords(new_names, create_definition_file, keyword):
 
 def test_scanner_names(new_names, create_definition_file):
     """Test that non-keyword alphanumeric identifiers parse as NAME types."""
+    # Tests standard names and names with the newly supported underscore
     file_path = create_definition_file("Gate_1 inputA")
     scanner = Scanner(file_path, new_names)
 
@@ -153,7 +157,7 @@ def test_scanner_unknown_characters(new_names, create_definition_file):
     file_path = create_definition_file("@ # ! 42")
     scanner = Scanner(file_path, new_names)
 
-    # Should skip the @, #, and ! and go straight to the number
+    # Should silently drop @, #, ! and return the first valid token
     sym = scanner.get_symbol()
     assert sym.type == scanner.NUMBER
     assert sym.id == 42
@@ -161,11 +165,14 @@ def test_scanner_unknown_characters(new_names, create_definition_file):
 
 def test_scanner_eof(new_names, create_definition_file):
     """Test that the EOF symbol is correctly generated at file termination."""
-    file_path = create_definition_file("")
+    file_path = create_definition_file("A")
     scanner = Scanner(file_path, new_names)
 
-    sym = scanner.get_symbol()
+    _ = scanner.get_symbol()  # Consume "A"
+    sym = scanner.get_symbol()  # Next should be EOF
     assert sym.type == scanner.EOF
+    assert sym.line_num == 0
+    assert sym.line_pos == 1
 
 
 def test_scanner_line_tracking(new_names, create_definition_file):
@@ -174,7 +181,6 @@ def test_scanner_line_tracking(new_names, create_definition_file):
     file_path = create_definition_file(content)
     scanner = Scanner(file_path, new_names)
 
-    # Line 0: "A = 12;"
     sym_a = scanner.get_symbol()
     assert sym_a.line_num == 0
     assert sym_a.line_pos == 0
@@ -191,26 +197,46 @@ def test_scanner_line_tracking(new_names, create_definition_file):
     assert sym_semi.line_num == 0
     assert sym_semi.line_pos == 6
 
-    # Line 3: "B" (0-indexed array so line 4 visually)
+    # Line index 3 (the 4th line physically): "B"
     sym_b = scanner.get_symbol()
     assert sym_b.line_num == 3
     assert sym_b.line_pos == 0
 
 
 def test_scanner_print_error_line(new_names, create_definition_file, capsys):
-    """Test the visual layout and dynamic padding of the error marker."""
-    content = "CONNECT A = B.I1;"
+    """Test the visual layout and dynamic padding (including tabs) of errors."""
+    content = "\tCONNECT A = B.I1;"
     file_path = create_definition_file(content)
     scanner = Scanner(file_path, new_names)
 
-    # Manually trigger an error pointer on the '=' sign (index 10)
-    scanner.print_error_line(0, 10)
+    # Trigger an error pointer on the '=' sign (index 11 due to leading tab)
+    scanner.print_error_line(0, 11)
 
     captured = capsys.readouterr()
     printed_lines = captured.out.split("\n")
 
-    # The first printed line should be the file text
     assert printed_lines[0] == content
-    # The second line should contain 10 spaces followed by the marker
-    expected_marker = " " * 10 + "^"
+    # The padding must strictly preserve the tab character, followed by spaces
+    expected_marker = "\t" + (" " * 10) + "^"
     assert printed_lines[1] == expected_marker
+
+
+def test_scanner_consecutive_symbols(new_names, create_definition_file):
+    """Test tokenization of dense strings with no spacing."""
+    content = "A=B.I1;"
+    file_path = create_definition_file(content)
+    scanner = Scanner(file_path, new_names)
+
+    sym1 = scanner.get_symbol()
+    assert sym1.type == scanner.NAME
+    assert new_names.get_name_string(sym1.id) == "A"
+
+    assert scanner.get_symbol().type == scanner.EQUALS
+
+    sym3 = scanner.get_symbol()
+    assert sym3.type == scanner.NAME
+    assert new_names.get_name_string(sym3.id) == "B"
+
+    assert scanner.get_symbol().type == scanner.DOT
+
+    sym5 = scanner.get
