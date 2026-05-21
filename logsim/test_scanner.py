@@ -239,4 +239,8 @@ def test_scanner_consecutive_symbols(new_names, create_definition_file):
 
     assert scanner.get_symbol().type == scanner.DOT
 
-    sym5 = scanner.get
+    sym5 = scanner.get_symbol()
+    assert sym5.type == scanner.NAME
+    assert new_names.get_name_string(sym5.id) == "I1"
+
+    assert scanner.get_symbol().type == scanner.SEMICOLON
