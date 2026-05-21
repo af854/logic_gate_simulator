@@ -1,20 +1,21 @@
 network_file         = { module }, network ;
 
 network              = "DEVICES", { device },
-                       ["NETS", name_list, ";"],
+                       ["NETS", { name_list, ";" }],
                        "CONNECT", { connect },
-                       "MONITOR", { monitor } ;
+                       "MONITOR", { signal_list, ";" } ;
 
 module               = "MODULE", name,
-                       "INPUTS", name_list, ";",
-                       "OUTPUTS", name_list, ";",
+                       "INPUTS", { name_list, ";" },
+                       "OUTPUTS", { name_list, ";" },
                        "DEVICES", { device },
-                       ["NETS", name_list, ";"],
+                       ["NETS", { name_list, ";" }],
                        "CONNECT", { connect },
                        "ENDMODULE", ";" ;
 
 device               = name_list, "=", device_kind, ";" ;
 name_list            = name, { ",", name } ;
+signal_list          = signal, { ",", signal } ;
 
 device_kind          = parameterised_device, "(", number, ")" 
                      | fixed_device 
@@ -24,10 +25,8 @@ parameterised_device = "AND" | "NAND" | "OR" | "NOR" | "CLOCK" | "SWITCH" ;
 fixed_device         = "DTYPE" | "XOR" ;
 module_device        = name ;
 
-connect              = signal, { ",", signal }, "=", source, ";" ;
+connect              = signal_list, "=", source, ";" ;
 source               = signal | literal ;
-
-monitor              = signal, { ",", signal }, ";" ;
 
 signal               = name, [ ".", name ] ;
 literal              = "0" | "1" ;
