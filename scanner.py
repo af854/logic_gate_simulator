@@ -85,6 +85,7 @@ class Scanner:
 
         keyword_list = [
             "DEVICES",
+            "NETS",
             "CONNECT",
             "MONITOR",
             "AND",
@@ -95,6 +96,10 @@ class Scanner:
             "SWITCH",
             "DTYPE",
             "XOR",
+            "MODULE",
+            "INPUTS",
+            "OUTPUTS",
+            "ENDMODULE",
         ]
 
         keyword_ids = self.names.lookup(keyword_list)
