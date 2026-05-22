@@ -10,13 +10,25 @@ Parser - parses the definition file and builds the logic network.
 """
 
 # This version of the parser supports syntax checks and the basic functionality
+# Implemented:
+# - Syntax 
+# - Make the devices
 # Not yet supported (to-do):
-# - Build the network
+# - Build the network connections
+# - Monitors 
 # - Semantic errors
 # - Literals
 # - Nets
 # - Modules
-# - Recursive modules
+# - Recursive modules (time-permitting)
+
+# Design pattern for parsing in this file:
+# Parsing functions are based on the EBNF specification as closely as possible
+# ALL parsing functions should consume all symbols that was part of its EBNF rule,
+# leaving self.symbol on the symbol immediately after. 
+# For example, parse_device should consume the ';'
+# and leave self.symbol on the symbol for the next device name, or CONNECT,
+# whichever is next.
 
 class Parser:
 
@@ -45,6 +57,9 @@ class Parser:
         """Initialise constants."""
         self.scanner = scanner
         self.names = names
+        self.network = network
+        self.devices = devices
+        self.monitors = monitors
 
         # Store the current symbol.
         self.symbol = None # 
@@ -54,7 +69,7 @@ class Parser:
         """Advance to the next symbol."""
         self.symbol = self.scanner.get_symbol()
 
-    def symbol_name(self):
+    def symbol_string(self):
         """Return the string name of the current symbol."""
         if self.symbol.id is None:
             return None
@@ -64,7 +79,7 @@ class Parser:
         """Return True if current symbol is the given keyword."""
         return (
             self.symbol.type == self.scanner.KEYWORD
-            and self.symbol_name() == name
+            and self.symbol_string() == name
         )
 
     def symbol_to_string(self, symbol):
@@ -87,12 +102,16 @@ class Parser:
 
         if symbol.id is None:
             token_id = "None"
+        elif symbol.type == self.scanner.NUMBER:
+            token_id = str(symbol.id) # ID of a NUMBER is the literal number (no need for lookup)
         else:
             token_id = self.names.get_name_string(symbol.id)
 
         return token_type + " " + token_id
     
-        
+    # ERROR HANDLING / MESSAGES #################################################################
+    
+    # General error message 
     def error(self, errormsg, symbol=None):
         """Print a descriptive error message and increment the error count.
         Takes in error message and Symbol object (default: self.symbol) as arguments. """
@@ -103,30 +122,67 @@ class Parser:
         print("Line " + str(symbol.line_num) + ", column " + str(symbol.line_pos)+":")
         self.scanner.print_error_line(symbol.line_num, symbol.line_pos)
 
+    # Deal with an error from Devices class
+    def device_error_message(self, error_type):
+        """Translate devices error code into a useful message."""
+        # Of these, NO_QUALIFIER, BAD_DEVICE, and QUALIFIER_PRESENT 
+        # should not ever be seen since parsing device_kind
+        # syntax should prevent this. 
+        if error_type == self.devices.NO_ERROR:
+            return None
+        if error_type == self.devices.INVALID_QUALIFIER:
+            return "Invalid device parameter"
+        if error_type == self.devices.NO_QUALIFIER:
+            return "Missing device parameter"
+        if error_type == self.devices.BAD_DEVICE:
+            return "Unknown device kind" 
+        if error_type == self.devices.QUALIFIER_PRESENT:
+            return "This device kind should not have a parameter"
+        if error_type == self.devices.DEVICE_PRESENT:
+            return "Device has already been defined"
+        return "Unknown device error"
+    
+
+    # EBNF RULE-BASED PARSING #################################################################
 
     def parse_name(self):
-        """Parse a name, and return True if successful."""
+        """Parse a name (i.e. check if the current symbol is a scanner.NAME) 
+        and return the symbol object if successful.
+        Return None otherwise."""
+        # We return the symbol object, not just the id, so we maintain information about the
+        # symbol's location, this will be helpful for error messages.
         if self.symbol.type == self.scanner.NAME:
-            self.advance()
-            return True
-
-        self.error("Expected a name and didn't get one")
-        return False
+            name_symbol = self.symbol
+            self.advance() # consume the name
+            return name_symbol
+        
+        if self.symbol.type == self.scanner.KEYWORD:
+            self.error("Name cannot be a reserved keyword: "+self.symbol_string())
+        else:
+            self.error("Expected a name and did not get one.")
+        return None
 
     def parse_name_list(self):
         """Parse name_list based on EBNF specification.
         name_list = name, { ',', name }.
-        Return True if successful."""
-        if not self.parse_name():
-            return False
+        Return list of symbol objects if successful."""
+
+        name_list = []
+
+        name_symbol = self.parse_name()
+        if name_symbol is None:
+            return None
+        name_list.append(name_symbol)
 
         while self.symbol.type == self.scanner.COMMA:
             self.advance()
 
-            if not self.parse_name():
-                return False
+            name_symbol = self.parse_name()
+            if name_symbol is None:
+                return None
+            name_list.append(name_symbol)
 
-        return True
+        return name_list
 
     def is_parameterised_device(self):
         """Check whether the current symbol refers to a KEYWORD that represents a parametrised device:
@@ -134,7 +190,7 @@ class Parser:
         if self.symbol.type != self.scanner.KEYWORD:
             return False
 
-        return self.symbol_name() in [
+        return self.symbol_string() in [
             "AND",
             "NAND",
             "OR",
@@ -149,7 +205,7 @@ class Parser:
         if self.symbol.type != self.scanner.KEYWORD:
             return False
 
-        return self.symbol_name() in [
+        return self.symbol_string() in [
             "DTYPE",
             "XOR",
         ]
@@ -157,44 +213,55 @@ class Parser:
     def parse_device_kind(self):
         """Parse device_kind in the EBNF:
         parametrised_device, \"(\", number, \")\",
-        or fixed_device. Return True if successful."""
+        or fixed_device. 
+        
+        Return a tuple containing (device_kind_id, device_parameter),
+        where device_kind_id is the name ID for the device string like "AND"
+        and device_parameter is a plain integer, like 2 for AND(2),
+         or return None if there's an error. """
 
         # When called should point to the symbol for the device keyword (like AND, SWITCH)
         # TODO Need to do something with this to build the network
 
         if self.is_parameterised_device():
-            self.advance()
+            device_kind_id = self.symbol.id
 
+            self.advance() # consume the device type like AND
             if self.symbol.type != self.scanner.L_BRACKET:
                 self.error("Expected '(' after parameterised device")
-                return False
-            self.advance()
+                return None
+            self.advance() # consume (
 
             if self.symbol.type != self.scanner.NUMBER:
                 self.error("Expected number")
-                return False
-
-            self.advance()
+                return None
+            device_parameter = self.symbol.id
+            self.advance() # consume the number
 
             if self.symbol.type != self.scanner.R_BRACKET:
                 self.error("Expected ')'")
-                return False
-
-            self.advance()
-            return True
+                return None
+            
+            self.advance() # consume )
+            return device_kind_id, device_parameter
 
         if self.is_fixed_device():
-            self.advance()
-            return True
+            device_kind_id = self.symbol.id
+            self.advance() # consume the device type like XOR
+            return device_kind_id, None
 
-        self.error("Expected device kind")
-        return False
+        self.error("Invalid device kind.")
+        return None
 
     def parse_device(self):
         """Parse device based on EBNF specification:
          device = name_list, '=', device_kind, ';'.
-         Return True if successful."""
-        if not self.parse_name_list():
+         Return True if successful, False otherwise"""
+        
+        # 1. Parse the device ebnf rule
+
+        device_name_list = self.parse_name_list()
+        if device_name_list is None:
             return False
 
         if self.symbol.type != self.scanner.EQUALS:
@@ -203,14 +270,43 @@ class Parser:
 
         self.advance()
 
-        if not self.parse_device_kind():
+        device_kind_symbol = self.symbol 
+
+        device_kind_result = self.parse_device_kind()
+        if(device_kind_result is None):
             return False
+        device_kind_id, device_parameter = device_kind_result
 
         if self.symbol.type != self.scanner.SEMICOLON:
             self.error("No Semicolon found after device definition")
             return False
+        
+        self.advance() # Consume semicolon
 
-        self.advance()
+        # 2. Actually make the device
+
+        for device_name in device_name_list: # device_name is a symbol
+            error_type = self.devices.make_device(
+                device_name.id,
+                device_kind_id,
+                device_parameter,
+            )
+
+            # string for the error message, or None if no error
+            error_message = self.device_error_message(error_type) 
+
+            if error_message is not None:
+                if error_type == self.devices.INVALID_QUALIFIER:
+                    # Only in the case of INVALID_QUALIFIER, we should point to
+                    # the device kind symbol; otherwise we should point to the device name.
+                    # All other errors involving the device kind should have been 
+                    # caught by parse_device_kind. 
+                    self.error(error_message, device_kind_symbol) 
+                else:
+                    # e.g. DEVICE_PRESENT: duplicate device
+                    self.error(error_message, device_name) 
+                return False
+
         return True
 
     def parse_devices(self):
@@ -310,7 +406,6 @@ class Parser:
                 return False
             
             self.advance() # consume the semicolon. 
-        
 
     def parse_network(self):
         """Parse the circuit definition file."""
