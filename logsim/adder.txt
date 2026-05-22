@@ -22,5 +22,6 @@ CONNECT
   OR1.I2 = AND2;
 
 MONITOR
-  XOR2, OR1;
+  XOR2;
+  OR1;
 

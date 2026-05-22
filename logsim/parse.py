@@ -9,8 +9,14 @@ Classes
 Parser - parses the definition file and builds the logic network.
 """
 
-
-# In this entire file 
+# This version of the parser supports syntax checks and the basic functionality
+# Not yet supported (to-do):
+# - Build the network
+# - Semantic errors
+# - Literals
+# - Nets
+# - Modules
+# - Recursive modules
 
 class Parser:
 
@@ -63,6 +69,7 @@ class Parser:
 
     def symbol_to_string(self, symbol):
         """Return a string representation of a symbol for debugging."""
+        # Debugging use only. For likely eventual removal. 
         token_names = {
             self.scanner.COMMA: "COMMA",
             self.scanner.SEMICOLON: "SEMICOLON",
@@ -191,7 +198,7 @@ class Parser:
             return False
 
         if self.symbol.type != self.scanner.EQUALS:
-            self.error("No equals found after device name")
+            self.error("No equals found after device name.")
             return False
 
         self.advance()
@@ -215,7 +222,7 @@ class Parser:
                 return True
 
             if self.symbol.type == self.scanner.EOF:
-                self.error("Unexpected end of file in DEVICES section")
+                self.error("Unexpected end of file in DEVICES section - ensure the file has CONNECT and MONITOR sections.")
                 return False
 
             if not self.parse_device():
@@ -253,7 +260,7 @@ class Parser:
 
     def parse_connect(self):
         """Parse connect based on EBNF specification.
-        connect = signal, { ',', signal }, '=', signal, ';'.
+        connect = signal_list, '=', signal, ';'.
         return True if successful."""
         if not self.parse_signal_list():
             return False
@@ -289,26 +296,21 @@ class Parser:
             if not self.parse_connect():
                 return False
 
-    def parse_monitor(self):
-        """Parse monitor = signal, { ',', signal }, ';'."""
-        if not self.parse_signal_list():
-            return False
-
-        if self.symbol.type != self.scanner.SEMICOLON:
-            self.error("Expected semicolon after monitor")
-            return False
-
-        self.advance()
-        return True
-
     def parse_monitors(self):
-        """Parse { monitor }."""
+        """Parse { signal_list, ";" }."""
         while True:
             if self.symbol.type == self.scanner.EOF:
                 return True
 
-            if not self.parse_monitor():
+            if not self.parse_signal_list():
                 return False
+                        
+            if self.symbol.type != self.scanner.SEMICOLON:
+                self.error("Expected semicolon after monitor definition")
+                return False
+            
+            self.advance() # consume the semicolon. 
+        
 
     def parse_network(self):
         """Parse the circuit definition file."""
