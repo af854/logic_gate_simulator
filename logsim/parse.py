@@ -10,6 +10,8 @@ Parser - parses the definition file and builds the logic network.
 """
 
 
+# In this entire file 
+
 class Parser:
 
     """Parse the definition file and build the logic network.
@@ -37,7 +39,9 @@ class Parser:
         """Initialise constants."""
         self.scanner = scanner
         self.names = names
-        self.symbol = None
+
+        # Store the current symbol.
+        self.symbol = None # 
         self.error_count = 0
 
     def advance(self):
@@ -80,14 +84,21 @@ class Parser:
             token_id = self.names.get_name_string(symbol.id)
 
         return token_type + " " + token_id
-
-    def error(self, errormsg):
-        """Print an error message and increment the error count."""
+    
+        
+    def error(self, errormsg, symbol=None):
+        """Print a descriptive error message and increment the error count.
+        Takes in error message and Symbol object (default: self.symbol) as arguments. """
+        if(symbol==None):
+            symbol = self.symbol
         self.error_count += 1
-        print("Error! " + errormsg + " | Symbol: " + self.symbol_to_string(self.symbol))
+        print("Error! " + errormsg + " | Symbol: " + self.symbol_to_string(symbol))
+        print("Line " + str(symbol.line_num) + ", column " + str(symbol.line_pos)+":")
+        self.scanner.print_error_line(symbol.line_num, symbol.line_pos)
+
 
     def parse_name(self):
-        """Parse name."""
+        """Parse a name, and return True if successful."""
         if self.symbol.type == self.scanner.NAME:
             self.advance()
             return True
@@ -96,7 +107,9 @@ class Parser:
         return False
 
     def parse_name_list(self):
-        """Parse name_list = name, { ',', name }."""
+        """Parse name_list based on EBNF specification.
+        name_list = name, { ',', name }.
+        Return True if successful."""
         if not self.parse_name():
             return False
 
@@ -109,7 +122,8 @@ class Parser:
         return True
 
     def is_parameterised_device(self):
-        """Check for AND, NAND, OR, NOR, CLOCK, SWITCH."""
+        """Check whether the current symbol refers to a KEYWORD that represents a parametrised device:
+        AND, NAND, OR, NOR, CLOCK, SWITCH."""
         if self.symbol.type != self.scanner.KEYWORD:
             return False
 
@@ -123,7 +137,8 @@ class Parser:
         ]
 
     def is_fixed_device(self):
-        """Check for DTYPE or XOR."""
+        """Check whether the current symbol refers to a KEYWORD that represents a fixed device:
+        DTYPE or XOR."""
         if self.symbol.type != self.scanner.KEYWORD:
             return False
 
@@ -133,14 +148,19 @@ class Parser:
         ]
 
     def parse_device_kind(self):
-        """Parse device_kind."""
+        """Parse device_kind in the EBNF:
+        parametrised_device, \"(\", number, \")\",
+        or fixed_device. Return True if successful."""
+
+        # When called should point to the symbol for the device keyword (like AND, SWITCH)
+        # TODO Need to do something with this to build the network
+
         if self.is_parameterised_device():
             self.advance()
 
             if self.symbol.type != self.scanner.L_BRACKET:
                 self.error("Expected '(' after parameterised device")
                 return False
-
             self.advance()
 
             if self.symbol.type != self.scanner.NUMBER:
@@ -164,7 +184,9 @@ class Parser:
         return False
 
     def parse_device(self):
-        """Parse device = name_list, '=', device_kind, ';'."""
+        """Parse device based on EBNF specification:
+         device = name_list, '=', device_kind, ';'.
+         Return True if successful."""
         if not self.parse_name_list():
             return False
 
@@ -185,7 +207,9 @@ class Parser:
         return True
 
     def parse_devices(self):
-        """Parse { device }."""
+        """Parse a list of devices, { device }. 
+        return True if successful.
+        """
         while True:
             if self.is_keyword_name("CONNECT"):
                 return True
@@ -198,7 +222,9 @@ class Parser:
                 return False
 
     def parse_signal(self):
-        """Parse signal = name, [ '.', name ]."""
+        """Parse signal based on EBNF specification:
+         signal = name, [ '.', name ].
+         return True if successful."""
         if not self.parse_name():
             return False
 
@@ -211,7 +237,9 @@ class Parser:
         return True
 
     def parse_signal_list(self):
-        """Parse signal, { ',', signal }."""
+        """Parse signal_list based on EBNF specification: 
+        signal_list = signal, { ',', signal }.
+        return True if successful."""
         if not self.parse_signal():
             return False
 
@@ -224,7 +252,9 @@ class Parser:
         return True
 
     def parse_connect(self):
-        """Parse connect = signal, { ',', signal }, '=', signal, ';'."""
+        """Parse connect based on EBNF specification.
+        connect = signal, { ',', signal }, '=', signal, ';'.
+        return True if successful."""
         if not self.parse_signal_list():
             return False
 
@@ -245,7 +275,9 @@ class Parser:
         return True
 
     def parse_connections(self):
-        """Parse { connect }."""
+        """Parse connections based on EBNF specification:
+         connections = { connect }.
+         return True if successful."""
         while True:
             if self.is_keyword_name("MONITOR"):
                 return True
@@ -281,10 +313,7 @@ class Parser:
     def parse_network(self):
         """Parse the circuit definition file."""
 
-        # network = "DEVICES", { device },
-        #           "CONNECT", { connect },
-        #           "MONITOR", { monitor };
-
+        # self.symbol starts on None, advance it once to get the first symbol
         self.advance()
 
         if self.is_keyword_name("DEVICES"):
