@@ -1,0 +1,27 @@
+DEVICES
+  CLK = CLOCK(1);
+  FF0, FF1 = DTYPE;
+  AND0, AND1 = AND(2);
+  ZERO = SWITCH(0); (* This is clunky. Will be removed when literal support is added. *)
+
+CONNECT
+  FF0.CLK = CLK;
+  FF1.CLK = CLK;
+
+  FF0.SET = ZERO;
+  FF0.CLEAR = ZERO;
+  FF1.SET = ZERO;
+  FF1.CLEAR = ZERO;
+
+  AND0.I1 = FF1.QBAR;
+  AND0.I2 = FF0.QBAR;
+
+  AND1.I1 = FF1.QBAR;
+  AND1.I2 = FF0.Q;
+
+  FF0.DATA = AND0;
+  FF1.DATA = AND1;
+
+MONITOR
+  CLK;
+  FF1.Q, FF0.Q;

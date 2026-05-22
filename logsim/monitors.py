@@ -10,6 +10,13 @@ Monitors - records and displays specified output signals.
 """
 import collections
 
+# Slight change made by Kevin Liu. Due to
+# separation of network.DEVICE_ABSENT into 
+# FIRST_DEVICE_ABSENT and SECOND_DEVICE_ABSENT
+# in network.py, we remove usage of network.DEVICE_ABSENT
+# and replace with a separate DEVICE_ABSENT in
+# the Monitors class.
+
 
 class Monitors:
 
@@ -58,7 +65,7 @@ class Monitors:
         self.monitors_dictionary = collections.OrderedDict()
 
         [self.NO_ERROR, self.NOT_OUTPUT,
-         self.MONITOR_PRESENT] = self.names.unique_error_codes(3)
+         self.MONITOR_PRESENT, self.DEVICE_ABSENT] = self.names.unique_error_codes(4)
 
     def make_monitor(self, device_id, output_id, cycles_completed=0):
         """Add the specified signal to the monitors dictionary.
@@ -67,7 +74,7 @@ class Monitors:
         """
         monitor_device = self.devices.get_device(device_id)
         if monitor_device is None:
-            return self.network.DEVICE_ABSENT
+            return self.DEVICE_ABSENT
         elif output_id not in monitor_device.outputs:
             return self.NOT_OUTPUT
         elif (device_id, output_id) in self.monitors_dictionary:
