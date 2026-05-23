@@ -41,6 +41,12 @@ from parser_objects import Signal
 # Net implementation:
 #    Two-pass approach for building connections
 #    While parsing each connection, store it in a list. 
+#    Also keep track of nets and the drivers of each net.
+#    Then, once all connections are parsed, process
+#    them all together by resolving net references
+#    to the actual output port that drives the net.
+#    Two pass approach is needed since nets can be used before they
+#    are driven. 
 
 
 class Parser:
@@ -360,6 +366,13 @@ class Parser:
 
     def is_net(self, signal):
         return signal.name_symbol.id in self.net_ids and signal.port_symbol is None
+    
+    def net_used_with_port(self, signal):
+        """Return True if signal uses a declared net name with a port."""
+        return (
+            signal.name_symbol.id in self.net_ids
+            and signal.port_symbol is not None
+        )
 
     def parse_net_declaration(self):
         """Parse a net declaration statement:
@@ -381,6 +394,8 @@ class Parser:
 
         for net_symbol in net_symbols:
             if self.device_exists(net_symbol):  # if a device already exists with the same name/id
+                # n.b. we dont need checks the other way (i.e. device name conflicts with net name)
+                # since device section is always before the nets section. 
                 self.error("Net name conflicts with an existing device name", net_symbol)
                 return False
             
@@ -539,12 +554,21 @@ class Parser:
 
         self.advance()
 
-        # 2. Store the connections to be made
+        # 2. Store the connections to be made, and some net semantic checks
+        #     (other semantic checks performed during resolve_and_create_connections)
+
+        if self.net_used_with_port(output_signal):
+            self.error("Net cannot have a port", output_signal.port_symbol)
+            return False
+
 
         for input_signal in input_signal_list:
             # If the LHS is a net, we store its RHS in net_driver_dict
             # (RHS can also be a net, this will be flattened with a call
             # to flatten_net_driver_dict during resolve_and_create_connections)
+            if self.net_used_with_port(input_signal):
+                self.error("Net cannot have a port", output_signal.port_symbol)
+                return False
             if self.is_net(input_signal):
                 net_id = input_signal.name_symbol.id
                 if(net_id not in self.net_driver_dict):
@@ -665,6 +689,15 @@ class Parser:
         # 2. create the monitors and detect semantic errors
 
         for monitor_signal in all_monitors_list:
+
+            # The display name for the monitor should be the actual name of the net
+            # specified, if the user wants to monitor a net. Thus we store
+            # the display name before we resolve the net
+            display_name = self.names.get_name_string(monitor_signal.name_symbol.id)
+            if monitor_signal.port_symbol is not None:
+                display_name.append(self.names.get_name_string(monitor_signal.port_symbol.id))
+
+            # Resolve the net reference
             if self.is_net(monitor_signal):
                 net_id = monitor_signal.name_symbol.id
 
@@ -705,6 +738,7 @@ class Parser:
 
                 self.error(error_message, error_symbol)
                 return False
+            self.monitors.set_monitor_display_name(device_id, port_id, display_name)
         return True 
 
 ##### PARSING: FULL NETWORK (TOP LEVEL FUNCTION) #################################################
