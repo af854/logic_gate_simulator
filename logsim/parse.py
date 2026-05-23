@@ -18,25 +18,29 @@ from parser_objects import Signal
 # - Build connections (network)
 # - Add monitors
 # - Semantic error messages
+# - Nets
 # Not yet supported (to-do):
 # - Literals
-# - Nets
 # - Modules
 # - Error Recovery
 # - Recursive modules (time-permitting)
-
-
+#
+#
 # Design pattern for parsing in this file:
-# Parsing functions are based on the EBNF specification as closely as possible
-# ALL parsing functions should consume all symbols that was part of its EBNF rule,
-# leaving self.symbol on the symbol immediately after.
-# For example, parse_device should consume the ';'
-# and leave self.symbol on the symbol for the next device name, or CONNECT,
-# whichever is next.
-
+#   Parsing functions are based on the EBNF specification as closely as possible
+#   ALL parsing functions should consume all symbols that was part of its EBNF rule,
+#   leaving self.symbol on the symbol immediately after.
+#   For example, parse_device should consume the ';'
+#   and leave self.symbol on the symbol for the next device name, or CONNECT,
+#   whichever is next.
+#
 # Making devices is implemented in the function parse_device()
 # Making connections is implemented in the funciton parse_connect()
-# Making monitors is implemented
+# Making monitors is implemented in the function parse_monitors()
+#
+# Net implementation:
+#    Two-pass approach for building connections
+#    While parsing each connection, store it in a list. 
 
 
 class Parser:
@@ -72,7 +76,21 @@ class Parser:
 
         # Store the current symbol.
         self.symbol = None
+        
+        self.net_ids = set() # Set that stores id of all nets. 
+        self.net_driver_dict = {} # Dictionary mapping net id to its driving signal.
+
+        # a list of tuples of Signal objects, (input signal, output signal)
+        # when parsing connections, collect all the connection statements
+        # into this list. Then once all connection statements are read, then we 
+        # go through the list again, resolving any net references to the
+        # actual aliased device output port. 
+        self.pending_connections = [] 
+
+        # Currently unused - will be used when error recovery is implemented
         self.error_count = 0
+
+
 
     def advance(self):
         """Advance to the next symbol."""
@@ -181,7 +199,40 @@ class Parser:
             return "Device does not exist"
         return "Unknown monitor error"
 
-##### EBNF RULE-BASED PARSING #########################################################################
+##### PARSING HELPER FUNCTIONS  #############################################################
+
+    def is_parameterised_device(self):
+        """Check whether the current symbol refers to a KEYWORD that represents a parametrised device:
+        AND, NAND, OR, NOR, CLOCK, SWITCH."""
+        if self.symbol.type != self.scanner.KEYWORD:
+            return False
+
+        return self.symbol_string() in [
+            "AND",
+            "NAND",
+            "OR",
+            "NOR",
+            "CLOCK",
+            "SWITCH",
+        ]
+
+    def is_fixed_device(self):
+        """Check whether the current symbol refers to a KEYWORD that represents a fixed device:
+        DTYPE or XOR."""
+        if self.symbol.type != self.scanner.KEYWORD:
+            return False
+
+        return self.symbol_string() in [
+            "DTYPE",
+            "XOR",
+        ]
+
+    def device_exists(self, symbol):
+        """Return True if symbol refers to an existing device and False otherwise. """
+        return self.devices.get_device(symbol.id) is not None
+
+    
+##### EBNF PARSING: BASIC EBNF RULES  #######################################################
 
     def parse_name(self):
         """Parse a name (i.e. check if the current symbol is a scanner.NAME) 
@@ -223,31 +274,44 @@ class Parser:
 
         return name_list
 
-    def is_parameterised_device(self):
-        """Check whether the current symbol refers to a KEYWORD that represents a parametrised device:
-        AND, NAND, OR, NOR, CLOCK, SWITCH."""
-        if self.symbol.type != self.scanner.KEYWORD:
-            return False
+    def parse_signal(self):
+        """Parse signal based on EBNF specification:
+         signal = name, [ '.', name ].
+         return Signal object if successful, None otherwise."""
+        name_symbol = self.parse_name()
+        if name_symbol is None:
+            return None
 
-        return self.symbol_string() in [
-            "AND",
-            "NAND",
-            "OR",
-            "NOR",
-            "CLOCK",
-            "SWITCH",
-        ]
+        if self.symbol.type == self.scanner.DOT:
+            self.advance()
 
-    def is_fixed_device(self):
-        """Check whether the current symbol refers to a KEYWORD that represents a fixed device:
-        DTYPE or XOR."""
-        if self.symbol.type != self.scanner.KEYWORD:
-            return False
+            port_symbol = self.parse_name()
+            if port_symbol is None:
+                return None
 
-        return self.symbol_string() in [
-            "DTYPE",
-            "XOR",
-        ]
+            return Signal(name_symbol=name_symbol, port_symbol=port_symbol)
+        return Signal(name_symbol=name_symbol, port_symbol=None)
+
+    def parse_signal_list(self):
+        """Parse signal_list based on EBNF specification: 
+        signal_list = signal, { ',', signal }.
+        return list of Signal objects if successful, None otherwise"""
+        signal_list = []
+
+        signal = self.parse_signal()
+        if signal is None:
+            return None
+        signal_list.append(signal)
+
+        while self.symbol.type == self.scanner.COMMA:
+            self.advance()
+
+            signal = self.parse_signal()
+            if signal is None:
+                return None
+            signal_list.append(signal)
+
+        return signal_list
 
     def parse_device_kind(self):
         """Parse device_kind in the EBNF:
@@ -291,6 +355,88 @@ class Parser:
 
         self.error("Invalid device kind.")
         return None
+    
+##### PARSING NETS AND NET HELPER FUNCTIONS #############################################################
+
+    def is_net(self, signal):
+        return signal.name_symbol.id in self.net_ids and signal.port_symbol is None
+
+    def parse_net_declaration(self):
+        """Parse a net declaration statement:
+          name_list, ';'."""
+        
+        # 1. EBNF based syntax and collect the names of the nets 
+        net_symbols = self.parse_name_list()
+
+        if net_symbols is None:
+            return False
+
+        if self.symbol.type != self.scanner.SEMICOLON:
+            self.error("Expected semicolon after net declaration")
+            return False
+
+        self.advance()
+
+        # 2. Semantic checks and create the actual nets.
+
+        for net_symbol in net_symbols:
+            if self.device_exists(net_symbol):  # if a device already exists with the same name/id
+                self.error("Net name conflicts with an existing device name", net_symbol)
+                return False
+            
+            net_id = net_symbol.id
+            # keep track of existing nets
+            if net_id in self.net_ids:
+                self.error("Net has already been declared", net_symbol)
+                return False
+            self.net_ids.add(net_id)
+
+        return True
+    
+    def parse_nets(self):
+        """Parse the NETS section.
+        Return True if successful and False otherwise. """
+        while True:
+            if self.is_keyword_name("CONNECT"): # end of NETS section. 
+                return True
+
+            if self.symbol.type == self.scanner.EOF:
+                self.error("Unexpected end of file in NETS section - should be followed by CONNECT section.")
+                return False
+
+            if not self.parse_net_declaration():
+                return False
+            
+    def flatten_net_driver_dict(self):
+        """Flatten net_driver_dict, so that the driver of every
+        net becomes the actual device output signal (instead of 
+        another net.) Return True if successful, and False otherwise."""
+
+        # Basically if we have
+        # net1 = net2; net2 = AND1.I1,
+        # this flattens net_driver_dict[net1] to be AND1.I1, not net2.
+        for net_id in list(self.net_driver_dict.keys()):
+            seen_net_ids = {net_id}
+            driver = self.net_driver_dict[net_id]
+            while self.is_net(driver):
+                driver_net_id = driver.name_symbol.id
+                if driver_net_id in seen_net_ids:
+                    self.error("Circular definition of nets detected", driver.name_symbol)
+                    return False
+
+                if driver_net_id not in self.net_driver_dict:
+                    self.error("Net has no driver", driver.name_symbol)
+                    return False
+
+                seen_net_ids.add(driver_net_id)
+                driver = self.net_driver_dict[driver_net_id]
+            self.net_driver_dict[net_id] = driver
+
+        return True
+
+    
+    
+##### EBNF PARSING: DEVICES, CONNECT, AND MONITOR ##################################################
 
     def parse_device(self):
         """Parse device based on EBNF specification:
@@ -353,7 +499,7 @@ class Parser:
         return True if successful.
         """
         while True:
-            if self.is_keyword_name("CONNECT"):
+            if self.is_keyword_name("CONNECT") or self.is_keyword_name("NETS"):
                 return True
 
             if self.symbol.type == self.scanner.EOF:
@@ -364,49 +510,12 @@ class Parser:
             if not self.parse_device():
                 return False
 
-    def parse_signal(self):
-        """Parse signal based on EBNF specification:
-         signal = name, [ '.', name ].
-         return Signal object if successful, None otherwise."""
-        device_symbol = self.parse_name()
-        if device_symbol is None:
-            return None
-
-        if self.symbol.type == self.scanner.DOT:
-            self.advance()
-
-            port_symbol = self.parse_name()
-            if port_symbol is None:
-                return None
-
-            return Signal(device_symbol=device_symbol, port_symbol=port_symbol)
-        return Signal(device_symbol=device_symbol, port_symbol=None)
-
-    def parse_signal_list(self):
-        """Parse signal_list based on EBNF specification: 
-        signal_list = signal, { ',', signal }.
-        return list of Signal objects if successful, None otherwise"""
-        signal_list = []
-
-        signal = self.parse_signal()
-        if signal is None:
-            return None
-        signal_list.append(signal)
-
-        while self.symbol.type == self.scanner.COMMA:
-            self.advance()
-
-            signal = self.parse_signal()
-            if signal is None:
-                return None
-            signal_list.append(signal)
-
-        return signal_list
-
     def parse_connect(self):
         """Parse connect based on EBNF specification.
         connect = signal_list, '=', signal, ';'.
-        return True if successful."""
+        Add all the connections to be made to pending_connections,
+        and build net_driver_dict. 
+        Return True if successful, false otherwise."""
 
         # 1. Parse the device EBNF rule (syntax)
 
@@ -422,7 +531,7 @@ class Parser:
 
         output_signal = self.parse_signal()
         if output_signal is None:
-            return None
+            return False
 
         if self.symbol.type != self.scanner.SEMICOLON:
             self.error("Expected semicolon after connection")
@@ -430,17 +539,53 @@ class Parser:
 
         self.advance()
 
-        # 2. Make the connections (and semantic checks)
-
-        output_device_id = output_signal.device_symbol.id
-        output_port_id = None if output_signal.port_symbol is None else output_signal.port_symbol.id
+        # 2. Store the connections to be made
 
         for input_signal in input_signal_list:
+            # If the LHS is a net, we store its RHS in net_driver_dict
+            # (RHS can also be a net, this will be flattened with a call
+            # to flatten_net_driver_dict during resolve_and_create_connections)
+            if self.is_net(input_signal):
+                net_id = input_signal.name_symbol.id
+                if(net_id not in self.net_driver_dict):
+                    self.net_driver_dict[net_id] = output_signal
+                else:
+                    self.error("Net has multiple drivers", input_signal.name_symbol)
+                    return False
+                
+            # Otherwise if LHS is a regular signal we just add it to the 
+            # pending connections list. 
+            else:
+                self.pending_connections.append((input_signal, output_signal))
 
-            input_device_id = input_signal.device_symbol.id
+        return True
+    
+    def resolve_and_create_connections (self):
+        """Resolve all net references in pending_connections, 
+        then create all the connections in the network. Return True if successful, False otherwise"""
+
+        if not self.flatten_net_driver_dict():
+            return False
+        
+        for connection in self.pending_connections:
+            input_signal, output_signal = connection
+
+            input_device_id = input_signal.name_symbol.id
             input_port_id = None if input_signal.port_symbol is None else input_signal.port_symbol.id
 
-            # input_signal and output_signal are Signal objects 
+            if self.is_net(output_signal):
+                net_id = output_signal.name_symbol.id
+
+                if net_id not in self.net_driver_dict:
+                    self.error("Net has no driver", output_signal.name_symbol)
+                    return False
+
+                output_signal = self.net_driver_dict[net_id]
+            
+            output_device_id = output_signal.name_symbol.id
+            output_port_id = None if output_signal.port_symbol is None else output_signal.port_symbol.id
+
+            # input_signal is the destination; output_signal is now resolved to the actual driver            
             connection_error_type = self.network.make_connection(
                 input_device_id, input_port_id, output_device_id, output_port_id
             )
@@ -453,27 +598,27 @@ class Parser:
                 # FIRST_ or SECOND_DEVICE_ABSENT, and same for PORT_ABSENT.
                 # This allows us to always point at the most relevant symbol in error msg.
                 if connection_error_type == self.network.FIRST_DEVICE_ABSENT:
-                    best_error_symbol = input_signal.device_symbol
+                    best_error_symbol = input_signal.name_symbol
                 elif connection_error_type == self.network.FIRST_PORT_ABSENT:   
                     best_error_symbol = input_signal.port_symbol
                 elif connection_error_type == self.network.SECOND_DEVICE_ABSENT:
-                    best_error_symbol = output_signal.device_symbol
+                    best_error_symbol = output_signal.name_symbol
                 elif connection_error_type == self.network.SECOND_PORT_ABSENT:   
                     best_error_symbol = output_signal.port_symbol
                 elif connection_error_type == self.network.INPUT_CONNECTED or connection_error_type == self.network.OUTPUT_TO_OUTPUT:
                     if input_signal.port_symbol is None:
-                        best_error_symbol = input_signal.device_symbol 
+                        best_error_symbol = input_signal.name_symbol 
                     else:
                         best_error_symbol = input_signal.port_symbol
                 elif connection_error_type == self.network.INPUT_TO_INPUT:
                     if output_signal.port_symbol is None:
-                        best_error_symbol = output_signal.device_symbol 
+                        best_error_symbol = output_signal.name_symbol 
                     else:
                         best_error_symbol = output_signal.port_symbol
                 self.error(error_message, best_error_symbol)
                 return False
-        
         return True
+
 
     def parse_connections(self):
         """Parse connections based on EBNF specification:
@@ -481,7 +626,7 @@ class Parser:
          return True if successful."""
         while True:
             if self.is_keyword_name("MONITOR"):
-                return True
+                return self.resolve_and_create_connections()
 
             if self.symbol.type == self.scanner.EOF:
                 self.error("Unexpected end of file in CONNECT section")
@@ -489,6 +634,7 @@ class Parser:
 
             if not self.parse_connect():
                 return False
+                
 
     def parse_monitors(self):
         """Parse EBNF for monitors section: 
@@ -519,7 +665,16 @@ class Parser:
         # 2. create the monitors and detect semantic errors
 
         for monitor_signal in all_monitors_list:
-            device_id = monitor_signal.device_symbol.id
+            if self.is_net(monitor_signal):
+                net_id = monitor_signal.name_symbol.id
+
+                if net_id not in self.net_driver_dict:
+                    self.error("Net has no driver", monitor_signal.name_symbol)
+                    return False
+
+                monitor_signal = self.net_driver_dict[net_id]
+
+            device_id = monitor_signal.name_symbol.id
             port_id = None if monitor_signal.port_symbol is None else monitor_signal.port_symbol.id
             
             error_type = self.monitors.make_monitor(device_id, port_id)
@@ -528,7 +683,7 @@ class Parser:
             error_symbol = self.symbol
             if error_message is not None:
                 if(monitor_signal.port_symbol is None):
-                    error_symbol = monitor_signal.device_symbol
+                    error_symbol = monitor_signal.name_symbol
                 else:
                     error_symbol = monitor_signal.port_symbol
                     # TODO right now, we always point to the port if it exists,
@@ -552,6 +707,8 @@ class Parser:
                 return False
         return True 
 
+##### PARSING: FULL NETWORK (TOP LEVEL FUNCTION) #################################################
+
     def parse_network(self):
         """Parse the full circuit definition file."""
 
@@ -567,6 +724,12 @@ class Parser:
             self.error(
                 "Error: DEVICES section not found at the start of the file")
             return False
+        
+        if self.is_keyword_name("NETS"):
+            self.advance()
+
+            if not self.parse_nets():
+                return False
 
         if self.is_keyword_name("CONNECT"):
             self.advance()
@@ -587,7 +750,7 @@ class Parser:
             return False
 
         if self.symbol.type != self.scanner.EOF:
-            self.error("Expected end of file - MONTIOR section should be the final section")
+            self.error("Expected end of file - MONITOR section should be the final section")
             return False
 
         if self.error_count == 0:
