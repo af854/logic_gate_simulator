@@ -98,9 +98,14 @@ class MyGLCanvas(wxcanvas.GLCanvas):
         size = self.GetClientSize()
 
         if not self.monitors.monitors_dictionary:
-            self.render_text("No monitor signals to display.", 10, size.height - 30)
+            self.render_text(
+                "No monitor signals to display.",
+                10,
+                size.height - 30,
+            )
         else:
-            # Find maximum trace length and monitor name length to determine how to scale the display
+            # Find maximum trace length and monitor name length to determine
+            # how to scale the display
             monitor_count = len(self.monitors.monitors_dictionary)
             max_trace_length = 0
             for trace in self.monitors.monitors_dictionary.values():
@@ -110,12 +115,16 @@ class MyGLCanvas(wxcanvas.GLCanvas):
 
             max_name_length = 0
             for device_id, output_id in self.monitors.monitors_dictionary:
-                monitor_name = self.monitors.get_monitor_display_name(device_id, output_id)
+                monitor_name = self.monitors.get_monitor_display_name(
+                    device_id,
+                    output_id,
+                )
                 name_length = len(monitor_name)
                 if name_length > max_name_length:
                     max_name_length = name_length
 
-            # Leave enough space for labels, but not more than 45% of the canvas width
+            # Leave enough space for labels, but not more than 45% of the
+            # canvas width
             label_space = max_name_length * 8 + 20
             maximum_label_space = size.width * 0.45
             if label_space > maximum_label_space:
@@ -129,7 +138,8 @@ class MyGLCanvas(wxcanvas.GLCanvas):
 
             step = 20
             if max_trace_length > 0:
-                # Compress long traces horizontally instead of drawing off-screen
+                # Compress long traces horizontally instead of drawing
+                # off-screen
                 step = available_width / max_trace_length
                 if step > 20:
                     step = 20
@@ -155,7 +165,9 @@ class MyGLCanvas(wxcanvas.GLCanvas):
             top_y = size.height - 50
 
             row = 0
-            for monitor_key, trace in self.monitors.monitors_dictionary.items():
+            for monitor_key, trace in (
+                self.monitors.monitors_dictionary.items()
+            ):
                 device_id, output_id = monitor_key
 
                 low_y = top_y - row * row_gap
@@ -327,8 +339,17 @@ class Gui(wx.Frame):
 
         # Continue keeps existing traces and device state, unlike Run
         self.continue_button = wx.Button(self, wx.ID_ANY, "Continue")
-        self.status_box = wx.TextCtrl(self, wx.ID_ANY, "", style=wx.TE_MULTILINE | wx.TE_READONLY)
-        self.switch_box = wx.Choice(self, wx.ID_ANY, choices=self.get_switch_names())
+        self.status_box = wx.TextCtrl(
+            self,
+            wx.ID_ANY,
+            "",
+            style=wx.TE_MULTILINE | wx.TE_READONLY,
+        )
+        self.switch_box = wx.Choice(
+            self,
+            wx.ID_ANY,
+            choices=self.get_switch_names(),
+        )
 
         if self.switch_box.GetCount() > 0:
             self.switch_box.SetSelection(0)
@@ -347,7 +368,11 @@ class Gui(wx.Frame):
         if self.monitor_box.GetCount() > 0:
             self.monitor_box.SetSelection(0)
         self.add_monitor_button = wx.Button(self, wx.ID_ANY, "Add Monitor")
-        self.remove_monitor_button = wx.Button(self, wx.ID_ANY, "Remove Monitor")
+        self.remove_monitor_button = wx.Button(
+            self,
+            wx.ID_ANY,
+            "Remove Monitor",
+        )
 
         # Bind events to widgets
         self.Bind(wx.EVT_MENU, self.on_menu)
@@ -355,7 +380,10 @@ class Gui(wx.Frame):
         self.continue_button.Bind(wx.EVT_BUTTON, self.on_continue_button)
         self.set_switch_button.Bind(wx.EVT_BUTTON, self.on_set_switch_button)
         self.add_monitor_button.Bind(wx.EVT_BUTTON, self.on_add_monitor_button)
-        self.remove_monitor_button.Bind(wx.EVT_BUTTON, self.on_remove_monitor_button)
+        self.remove_monitor_button.Bind(
+            wx.EVT_BUTTON,
+            self.on_remove_monitor_button,
+        )
 
         # Configure sizers for layout
         main_sizer = wx.BoxSizer(wx.HORIZONTAL)
@@ -385,7 +413,11 @@ class Gui(wx.Frame):
         if Id == wx.ID_EXIT:
             self.Close(True)
         if Id == wx.ID_ABOUT:
-            wx.MessageBox("Logic Simulator", "About Logsim", wx.ICON_INFORMATION | wx.OK)
+            wx.MessageBox(
+                "Logic Simulator",
+                "About Logsim",
+                wx.ICON_INFORMATION | wx.OK,
+            )
 
     def on_run_button(self, event):
         """Handle the event when the user clicks the run button."""
@@ -399,8 +431,9 @@ class Gui(wx.Frame):
         self.monitors.reset_monitors()
         self.cycles_completed = 0
 
-        # Run starts from a clean trace - the shared helper records each cycles signals and 
-        # updates the display after running the requested number of cycles
+        # Run starts from a clean trace - the shared helper records each
+        # cycle's signals and updates the display after running the requested
+        # number of cycles
         if self.run_cycles(cycles):
             self.show_status(f"Ran simulation for {cycles} cycles.")
             self.canvas.render()
@@ -413,7 +446,9 @@ class Gui(wx.Frame):
 
         for _ in range(cycles):
             if not self.network.execute_network():
-                self.show_status("Error: network failed to reach a steady state.")
+                self.show_status(
+                    "Error: network failed to reach a steady state."
+                )
                 return False
 
             self.monitors.record_signals()
@@ -467,7 +502,8 @@ class Gui(wx.Frame):
 
     def get_signal_ids(self, signal_name):
         """Return device and port IDs for an existing signal name."""
-        # Using query rather than lookup so invalid GUI input does not create names
+        # Using query rather than lookup so invalid GUI input does not create
+        # names
         name_parts = signal_name.split(".")
         number_of_parts = len(name_parts)
 
@@ -497,7 +533,10 @@ class Gui(wx.Frame):
             device = self.devices.get_device(device_id)
 
             for output_id in device.outputs:
-                signal_name = self.devices.get_signal_name(device_id, output_id)
+                signal_name = self.devices.get_signal_name(
+                    device_id,
+                    output_id,
+                )
                 if signal_name is not None:
                     if signal_name.startswith("@"):
                         continue
@@ -508,7 +547,7 @@ class Gui(wx.Frame):
     def on_set_switch_button(self, event):
         """Handle the event when the user sets a switch value."""
         switch_selection = self.switch_box.GetSelection()
-        
+
         if switch_selection == wx.NOT_FOUND:
             self.show_status("Error: select a switch.")
             return
@@ -553,13 +592,21 @@ class Gui(wx.Frame):
         device_id, output_id = signal_ids
 
         if add_monitor:
-            error_type = self.monitors.make_monitor(device_id, output_id, self.cycles_completed)
+            error_type = self.monitors.make_monitor(
+                device_id,
+                output_id,
+                self.cycles_completed,
+            )
 
-            # make_monitor returns an error code, so decode it if it fails or confirm success if it works
+            # make_monitor returns an error code, so decode it if it fails or
+            # confirm success if it works
             if error_type == self.monitors.NO_ERROR:
                 self.show_status(f"Added monitor for {monitor_name}.")
             elif error_type == self.monitors.MONITOR_PRESENT:
-                existing_name = self.monitors.get_monitor_display_name(device_id, output_id)
+                existing_name = self.monitors.get_monitor_display_name(
+                    device_id,
+                    output_id,
+                )
 
                 if existing_name != monitor_name:
                     self.show_status(
@@ -571,7 +618,7 @@ class Gui(wx.Frame):
                         f"Error: could not add monitor for {monitor_name}. "
                         f"{self.monitor_error_message(error_type)}."
                     )
-                    
+
             else:
                 self.show_status(
                     f"Error: could not add monitor for {monitor_name}. "
@@ -580,19 +627,23 @@ class Gui(wx.Frame):
 
         else:
             # remove_monitor returns True/False, unlike make_monitor
-            monitor_was_removed = self.monitors.remove_monitor(device_id, output_id)
+            monitor_was_removed = self.monitors.remove_monitor(
+                device_id,
+                output_id,
+            )
 
             if monitor_was_removed:
                 self.show_status(f"Removed monitor for {monitor_name}.")
             else:
-                self.show_status(f"Error: could not remove monitor for {monitor_name}. ")
+                self.show_status(
+                    f"Error: could not remove monitor for {monitor_name}."
+                )
 
         self.canvas.render()
 
     def on_add_monitor_button(self, event):
         """Handle the event when the user adds a monitor."""
         self.change_monitor(add_monitor=True)
-
 
     def on_remove_monitor_button(self, event):
         """Handle the event when the user removes a monitor."""
