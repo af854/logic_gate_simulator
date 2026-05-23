@@ -19,8 +19,8 @@ from parser_objects import Signal
 # - Add monitors
 # - Semantic error messages
 # - Nets
-# Not yet supported (to-do):
 # - Literals
+# Not yet supported (to-do):
 # - Modules
 # - Error Recovery
 # - Recursive modules (time-permitting)
@@ -47,6 +47,14 @@ from parser_objects import Signal
 #    to the actual output port that drives the net.
 #    Two pass approach is needed since nets can be used before they
 #    are driven. 
+#    TODO Known issue: add/zap monitor can't handle nets since
+#    everything is currently handled parser-side. And we can't 
+#    monitor an output and a net connected to this output
+#    at the same time. 
+#
+# Literal implementation:
+#    We create a SWITCH(0) or SWITCH(1) device, used internally only
+#    to provide the literal 0 or 1 signals.
 
 
 class Parser:
@@ -143,7 +151,7 @@ class Parser:
 
         return token_type + " " + token_id
 
-##### ERROR HANDLING / MESSAGES #########################################################################
+##### ERROR HANDLING / MESSAGES ####################################################################
 
     # General error message
     def error(self, errormsg, symbol=None):
@@ -284,6 +292,19 @@ class Parser:
         """Parse signal based on EBNF specification:
          signal = name, [ '.', name ].
          return Signal object if successful, None otherwise."""
+        
+        # 0 or 1 should be a literal
+        if self.symbol.type == self.scanner.NUMBER:
+            literal_symbol = self.symbol
+            value = self.symbol.id
+
+            if value not in [0, 1]:
+                self.error_at("Only 0 or 1 can be used as a signal literal",literal_symbol)
+                return None
+
+            self.advance()
+            return Signal(name_symbol=literal_symbol, port_symbol=None, is_literal=True, literal_value=value)
+
         name_symbol = self.parse_name()
         if name_symbol is None:
             return None
@@ -449,9 +470,50 @@ class Parser:
 
         return True
 
+##### Helper functions for LITERALS ################################################################
+
+    def get_or_create_const_switch(self, signal):
+        """Return Signal object for artificial SWITCH(0) or SWITCH(1) used for literals."""
+        # When there is a literal in the code like 0 or 1,
+        # We create artificial SWITCH(0) and SWITCH(1) with an internal
+        # switch name @LITERAL_0 or @LITERAL_1
+        # and use that to provide the literal signal.
+        if not signal.is_literal:
+            self.error("Internal error: get_or_create_const_switch called on a non-literal signal", signal.name_symbol)
+
+        value = signal.literal_value
+        
+
+        if value == 0:
+            const_name = "@LITERAL_0"
+        elif value == 1:
+            const_name = "@LITERAL_1"
+        else:
+            self.error("Only 0 or 1 can be used as a signal literal", signal.name_symbol)
+            return None
+
+        # Get the ID in the names dict for @LITERAL_0/1 (or make new ID for it)
+        const_device_id = self.names.lookup([const_name])[0]
+
+        # if we had already made the device, we just return it
+        if self.devices.get_device(const_device_id) is not None:
+            return const_device_id
+
+        error_type = self.devices.make_device(
+            const_device_id,
+            self.devices.SWITCH,
+            value,
+        )
+
+        error_message = self.device_error_message(error_type)
+        if error_message is not None:
+            print("Internal Error: unexpected error when creating literal switch:") # This should never happen
+            self.error(error_message, signal.name_symbol)
+            return None
+
+        return const_device_id
     
-    
-##### EBNF PARSING: DEVICES, CONNECT, AND MONITOR ##################################################
+##### PARSE AND BUILD DEVICES ########################################################################
 
     def parse_device(self):
         """Parse device based on EBNF specification:
@@ -524,6 +586,9 @@ class Parser:
 
             if not self.parse_device():
                 return False
+            
+##### PARSE AND BUILD CONNECTIONS ############################################################################
+
 
     def parse_connect(self):
         """Parse connect based on EBNF specification.
@@ -561,7 +626,6 @@ class Parser:
             self.error("Net cannot have a port", output_signal.port_symbol)
             return False
 
-
         for input_signal in input_signal_list:
             # If the LHS is a net, we store its RHS in net_driver_dict
             # (RHS can also be a net, this will be flattened with a call
@@ -569,6 +633,11 @@ class Parser:
             if self.net_used_with_port(input_signal):
                 self.error("Net cannot have a port", output_signal.port_symbol)
                 return False
+            
+            if input_signal.is_literal:
+                self.error("Literal (0 or 1) cannot be on LHS of expression", input_signal.name_symbol)
+                return False
+
             if self.is_net(input_signal):
                 net_id = input_signal.name_symbol.id
                 if(net_id not in self.net_driver_dict):
@@ -605,9 +674,15 @@ class Parser:
                     return False
 
                 output_signal = self.net_driver_dict[net_id]
-            
-            output_device_id = output_signal.name_symbol.id
-            output_port_id = None if output_signal.port_symbol is None else output_signal.port_symbol.id
+
+            if output_signal.is_literal:
+                output_device_id = self.get_or_create_const_switch(output_signal)
+                if output_device_id is None:
+                    return False
+                output_port_id = None
+            else:
+                output_device_id = output_signal.name_symbol.id
+                output_port_id = None if output_signal.port_symbol is None else output_signal.port_symbol.id
 
             # input_signal is the destination; output_signal is now resolved to the actual driver            
             connection_error_type = self.network.make_connection(
@@ -659,6 +734,7 @@ class Parser:
             if not self.parse_connect():
                 return False
                 
+##### PARSE AND BUILD MONITORS ############################################################################
 
     def parse_monitors(self):
         """Parse EBNF for monitors section: 
@@ -695,7 +771,7 @@ class Parser:
             # the display name before we resolve the net
             display_name = self.names.get_name_string(monitor_signal.name_symbol.id)
             if monitor_signal.port_symbol is not None:
-                display_name.append(self.names.get_name_string(monitor_signal.port_symbol.id))
+                display_name += "." + self.names.get_name_string(monitor_signal.port_symbol.id)
 
             # Resolve the net reference
             if self.is_net(monitor_signal):
@@ -741,7 +817,7 @@ class Parser:
             self.monitors.set_monitor_display_name(device_id, port_id, display_name)
         return True 
 
-##### PARSING: FULL NETWORK (TOP LEVEL FUNCTION) #################################################
+##### PARSING: FULL NETWORK (TOP LEVEL FUNCTION) ######################################################
 
     def parse_network(self):
         """Parse the full circuit definition file."""
