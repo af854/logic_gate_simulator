@@ -1,0 +1,101 @@
+MODULE FULL_ADDER
+    INPUTS A, B, CIN;
+    OUTPUTS SUM, COUT;
+
+    DEVICES
+        X1 = XOR;
+        X2 = XOR;
+        A1 = AND(2);
+        A2 = AND(2);
+        O1 = OR(2);
+
+    NETS
+        AXORB;
+        AB;
+        CARRY_PART;
+
+    CONNECT
+
+        O1.I1 = AB;
+        O1.I2 = CARRY_PART;
+        COUT = O1;
+        
+        X1.I1 = A;
+        X1.I2 = B;
+        AXORB = X1;
+
+        X2.I1 = AXORB;
+        X2.I2 = CIN;
+        SUM = X2;
+
+        A1.I1 = A;
+        A1.I2 = B;
+        AB = A1;
+
+        A2.I1 = AXORB;
+        A2.I2 = CIN;
+        CARRY_PART = A2;
+
+
+
+ENDMODULE;
+
+
+DEVICES
+    A0 = SWITCH(1);
+    A1 = SWITCH(0);
+    A2 = SWITCH(1);
+    A3 = SWITCH(0);
+
+    B0 = SWITCH(1);
+    B1 = SWITCH(1);
+    B2 = SWITCH(0);
+    B3 = SWITCH(0);
+
+    CIN = SWITCH(0);
+
+    FA0 = FULL_ADDER;
+    FA1 = FULL_ADDER;
+    FA2 = FULL_ADDER;
+    FA3 = FULL_ADDER;
+
+NETS
+    CARRY_1;
+    CARRY_2;
+    CARRY_3;
+
+CONNECT
+    FA0.A = A0;
+    FA0.B = B0;
+    FA0.CIN = CIN;
+    CARRY_1 = FA0.COUT;
+
+    FA1.A = A1;
+    FA1.B = B1;
+    FA1.CIN = CARRY_1;
+    CARRY_2 = FA1.COUT;
+
+    FA2.A = A2;
+    FA2.B = B2;
+    FA2.CIN = CARRY_2;
+    CARRY_3 = FA2.COUT;
+
+    FA3.A = A3;
+    FA3.B = B3;
+    FA3.CIN = CARRY_3;
+
+MONITOR
+    A3,
+    A2,
+    A1,
+    A0,
+    B3,
+    B2,
+    B1,
+    B0,
+    CIN,
+    FA3.SUM,
+    FA2.SUM,
+    FA1.SUM,
+    FA0.SUM,
+    FA3.COUT;
