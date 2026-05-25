@@ -121,7 +121,7 @@ class Scanner:
                 self.line_starts.append(i + 1)
 
         regex_pattern = (
-            r"(?P<COMMENT>\(\*.*?\*\))|"  # Matches EBNF-style comments
+            r"(?P<COMMENT>\(\*.*?\*\)|#[^\n]*)|"  # EBNF and Python style comments
             r"(?P<WHITESPACE>\s+)|"  # Matches spaces, tabs, newlines
             r"(?P<NUMBER>\d+)|"  # Matches sequences of digits
             r"(?P<NAME>[A-Za-z][A-Za-z0-9_]*)|"  # Matches identifiers & keywords
