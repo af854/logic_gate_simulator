@@ -13,7 +13,7 @@ module               = "MODULE", name,
                        "CONNECT", { connect },
                        "ENDMODULE", ";" ;
 
-device               = name_list, "=", device_kind, ";" ;
+device               = device_kind, name_list, ";" ;
 name_list            = name, { ",", name } ;
 signal_list          = signal, { ",", signal } ;
 
