@@ -1,0 +1,44 @@
+(* Module definitions *)
+
+MODULE DIVIDE_BY_2
+    INPUTS IN;
+    OUTPUTS OUT;
+    DEVICES
+        FF = DTYPE;
+    CONNECT
+        FF.DATA = FF.QBAR;
+        FF.CLK = IN;
+
+        (* Literal 0 used for SET and CLEAR inputs *)
+        FF.SET = 0; 
+        FF.CLEAR = 0;
+
+        OUT = FF.Q;
+ENDMODULE;
+
+MODULE DIVIDE_BY_4 # module
+    INPUTS IN;
+    OUTPUTS OUT;
+    DEVICES
+        (* DIVIDE_BY_4 module instantiates two DIVIDE_BY_2 modules *)
+        DIV2_0, DIV2_1 = DIVIDE_BY_2; 
+    CONNECT
+        DIV2_0.IN = IN;
+        DIV2_1.IN = DIV2_0.OUT;
+        OUT = DIV2_1.OUT;
+ENDMODULE;
+
+(* Main circuit *)
+
+DEVICES
+    CLK = CLOCK(1);
+    DIV4_0, DIV4_1 = DIVIDE_BY_4;
+NETS
+    CLK_16;
+CONNECT
+    DIV4_0.IN = CLK;
+    DIV4_1.IN = DIV4_0.OUT;
+    CLK_16 = DIV4_1.OUT;
+MONITOR
+    CLK,
+    CLK_16;

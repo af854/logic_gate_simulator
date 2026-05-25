@@ -11,7 +11,6 @@ Parser - parses the definition file and builds the logic network.
 
 from parser_objects import Signal, ModuleDefinition, ModuleDevice
 
-# This version of the parser supports syntax checks and the basic functionality
 # Implemented:
 # - Full syntax check
 # - Make devices
@@ -20,10 +19,10 @@ from parser_objects import Signal, ModuleDefinition, ModuleDevice
 # - Semantic error messages
 # - Nets
 # - Literals
-# Not yet supported (to-do):
 # - Modules
+# - Hierarchical modules 
+# Not yet supported (to-do):
 # - Error Recovery
-# - Hierarchical modules (time-permitting)
 #
 #
 # Design pattern for parsing in this file:
@@ -37,6 +36,19 @@ from parser_objects import Signal, ModuleDefinition, ModuleDevice
 # Making devices is implemented in the function parse_device()
 # Making connections is implemented in the funciton parse_connect()
 # Making monitors is implemented in the function parse_monitors()
+#
+# Summary of module and nets implementation:
+#    Devices inside a module instance get turned to devices
+#    with the name INSTANCENAME->DEVICENAME
+#    Module input and output ports get turned into nets with 
+#    the name INSTANCENAME->PORTNAME
+#    Nets inside a module get turned into nets with
+#    the name INSTANCENAME->NETNAME
+#    (Hierarchical modules automatically get names like
+#    INSTANCENAME->SUB_INSTANCENAME->...->NAME)
+#    Then we gather all the connections, 
+#    resolve all net references to their drivers,
+#    and build the connections. 
 #
 # Net implementation:
 #    Two-pass approach for building connections
@@ -67,15 +79,36 @@ from parser_objects import Signal, ModuleDefinition, ModuleDevice
 #    and signals using an internal name for each instance of the 
 #    module e.g. INSTANCENAME->SIGNALNAME (using name_id and port_id)
 #    of the Signal class. 
+#
+#    Then the rest continues as usual - we just add the module's internal
+#    connections to pending_connections, and make sure to use the internal net/device
+#    names whenever we see a module instance input/output port
+#    when making connnections and monitors in the main circuit.
+#
+# Hierarchical modules:
+#    The code is already written in a way that makes hierarchical modules 
+#    relatively straightforward.
+#    A new field is added to instantiate_module and all related methods
+#    to allow storage of instance_id which can be different from the instance_symbol
+#    (see instantiate_module comments)
+#    
+#    We recursively call instantiate_module to instantiate the hierarchy.
+#    Hierarchical modules and names inside have IDs with extra ->: for example
+#    FULLADDER1->HALFADDER->XOR1
+#    
+#    instantiate_module is also updated to deal with seeing module signals
+#    inside the instantiation - these must be translated to the internal
+#    net/device names. 
+#   
+#    TODO explicit check for recursive/looped module definition (
+#    but currently this should not be possible anyway
+#    due to module must be defined before instantiated)
+#    TODO combinational loop checks
+#    TODO currently we can't really add a monitor easily
+#    for a signal that is within 
+#    TODO PEP8 formatting compliance and finish docstrings
 
 
-
-# Notes for immediate next steps for module:
-# - currenty the Signal object since we're only using the Symbols (and there's no field for string names)
-# it is a bit bad because we can't really do our turn our module ports into nets, then connect nets
-# again into signals, etc logic 
-# this is why we maybe need the string fields too. Then the Symbol field for such one could point to something
-# useful for error msg? idk
 
 
 class Parser:
@@ -963,16 +996,18 @@ class Parser:
 #############################################################################################   
 
     # Helpers 
-
-    def make_internal_name_id_from_id(self, instance_symbol, local_id):
-        """Return name id for an internal name e.g. H1->X1."""
-        instance_name = self.names.get_name_string(instance_symbol.id)
-        # The name of the internal device, net, input/output inside a module definition
-        local_name = self.names.get_name_string(local_id) 
+    
+    def make_internal_name_id_from_instance_id(self, instance_id, local_id):
+        # input instance_id is the id of the module instance within which
+        # a device, connect, or sub-module with instance local_id is being instantiated. 
+        # returns an id for "instance_name->local_name"
+        #
+        instance_name = self.names.get_name_string(instance_id)
+        local_name = self.names.get_name_string(local_id)
         internal_name = instance_name + "->" + local_name
-        return self.names.lookup([internal_name])[0] 
+        return self.names.lookup([internal_name])[0]
 
-    def map_module_signal_to_instance_signal(self, signal, instance_symbol):
+    def map_module_signal_to_instance_signal(self, signal, instance_id):
         """Map a signal inside a module definition to the corresponding signal
         inside one module instance.
         """
@@ -987,8 +1022,8 @@ class Parser:
         if signal.is_literal:
             return signal
 
-        internal_main_id = self.make_internal_name_id_from_id(
-            instance_symbol,
+        internal_main_id = self.make_internal_name_id_from_instance_id(
+            instance_id,
             signal.main_id,
         )
 
@@ -1008,7 +1043,7 @@ class Parser:
             and (signal.main_id, signal.port_id) in self.module_instance_ports
         )
     
-    def instantiate_module(self, instance_symbol, module_name_id):
+    def instantiate_module(self, instance_symbol, module_name_id, instance_id):
         """Actually instantiate the module. 
         Takes in symbol of the instance name and the module name id"""
 
@@ -1020,89 +1055,120 @@ class Parser:
         # and use pre-existing nets/devices functionality to build
         # all the devices and connections in the module. 
 
+        # field instance_id  - this is because now we have
+        # modules inside modules, say we can have
+        # module FA (full adder), instantiating module HA
+        # The internal names for things in the HA should become
+        # FA1->HA->X1, FA2->HA->X1
+        # So we want to be able to modify the instance_id to store
+        # these internal names like FA1->HA->something, without actually modifying
+        # instance_symbol.id (in the module's definition). i.e. We dont want to 
+        # change HA into FA1->HA in the definition, but we still want to keep track
+        # that this instance_id should be FA1->H1
+
+        # EVERYTHING should now use instance_id, except for keeping track of
+        # instance_symbol for the purpose of error messages. 
+
         # 1. Check that the instance name is valid
 
         module_name = self.names.get_name_string(module_name_id)
         module_definition = self.module_definitions[module_name]
 
-        if instance_symbol.id in self.module_instance_ids:
+        if instance_id in self.module_instance_ids: # note to self: had to change these
+                                                    # to use instance_id not instance_symbol.id
+                                                    # since otherwise FA1.H1 and FA2.H1 conflict
+                                                    # because we're only checking H1
             self.error("Module instance has already been defined", instance_symbol)
             return False
 
-        if self.devices.get_device(instance_symbol.id) is not None:
+        if self.devices.get_device(instance_id) is not None:
             self.error("Module instance name conflicts with an existing device", instance_symbol)
             return False
 
-        if instance_symbol.id in self.net_ids:
+        if instance_id in self.net_ids:
             self.error("Module instance name conflicts with an existing net", instance_symbol)
             return False
 
         # Add the instance id to the set for future duplicate detection
-        self.module_instance_ids.add(instance_symbol.id)
+        self.module_instance_ids.add(instance_id)
 
         # 2. Create all the nets and signals corresponding to
         #    the module instance's input and output ports
-        
+
         for input_id in module_definition.input_ids:
             # get the internal net id, by adding the internal name
             # (e.g. H1->A) to the name table
-            internal_input_id = self.make_internal_name_id_from_id(instance_symbol, input_id)
+            # we use the instance_id for this call, the full FA1->HA->A instead of just HA->A
+            internal_input_id = self.make_internal_name_id_from_instance_id(instance_id, input_id)
             # create the net
             self.net_ids.add(internal_input_id)
 
             # keep track of the signal as a module input
             # e.g. module_instance_ports[(H1, A)] for instance name H1, input A
-            self.module_instance_ports[(instance_symbol.id, input_id)] = Signal(
+            self.module_instance_ports[(instance_id, input_id)] = Signal(
                 main_symbol=instance_symbol,
                 port_symbol=None,
                 main_id=internal_input_id,
                 port_id=None,
             )
-            self.module_instance_port_directions[(instance_symbol.id, input_id)] = "input"
+            self.module_instance_port_directions[(instance_id, input_id)] = "input"
 
         for output_id in module_definition.output_ids:
             # get the internal net id, by adding the internal name
             # (e.g. H1->A) to the name table
-            internal_output_id = self.make_internal_name_id_from_id(instance_symbol, output_id)
+            internal_output_id = self.make_internal_name_id_from_instance_id(instance_id, output_id)
             # create the net
             self.net_ids.add(internal_output_id)
 
             # keep track of the signal as a module output
             # e.g. module_instance_ports[(H1, SUM)] for instance name H1, output SUM
-            self.module_instance_ports[(instance_symbol.id, output_id)] = Signal(
+            self.module_instance_ports[(instance_id, output_id)] = Signal(
                 main_symbol=instance_symbol,
                 port_symbol=None,
                 main_id=internal_output_id,
                 port_id=None,
             )
-            self.module_instance_port_directions[(instance_symbol.id, output_id)] = "output"
+            self.module_instance_port_directions[(instance_id, output_id)] = "output"
 
         # 3. Create the module instance's nets 
         for module_net_id in module_definition.net_ids:
-            internal_net_id = self.make_internal_name_id_from_id(instance_symbol, module_net_id)
+            internal_net_id = self.make_internal_name_id_from_instance_id(instance_id, module_net_id)
             self.net_ids.add(internal_net_id)
 
         # 4. Create the devices for the module instance
         for module_device in module_definition.devices:
-            if module_device.kind_type != "primitive":
-                # TEMPORARY
-                self.error("Nested module instances are not supported yet",module_device.symbol)
+            if module_device.kind_type == "module":
+                # nested modules
+
+                nested_instance_id = self.make_internal_name_id_from_instance_id(instance_id, module_device.symbol.id)
+                 
+                # Recursive call to instantiate_module. 
+                # e.g. current instance_id corresponds to FA1
+                # nested_instance_id is thus FA1->HA
+                if not self.instantiate_module(
+                    module_device.symbol,
+                    module_device.kind_name,
+                    instance_id=nested_instance_id):
+                    return False
+                
+            elif module_device.kind_type == "primitive":
+                internal_device_id = self.make_internal_name_id_from_instance_id(instance_id, module_device.symbol.id)
+
+                # Create the device with the internal id
+                error_type = self.devices.make_device(
+                    internal_device_id,
+                    module_device.kind_name,
+                    module_device.parameter_value,
+                )
+
+                error_message = self.device_error_message(error_type)
+                if error_message is not None:
+                    self.error(error_message, module_device.symbol)
+                    return False
+            else:
+                self.error("Internal error: unknown module device kind", module_device.symbol)
                 return False
-
-            internal_device_id = self.make_internal_name_id_from_id(instance_symbol, module_device.symbol.id)
-
-            # Create the device with the internal id
-            error_type = self.devices.make_device(
-                internal_device_id,
-                module_device.kind_name,
-                module_device.parameter_value,
-            )
-
-            error_message = self.device_error_message(error_type)
-            if error_message is not None:
-                self.error(error_message, module_device.symbol)
-                return False
-            
+                
         # 5. Add all the module's connctions into pending_connections
         for local_input_signal, local_output_signal in module_definition.connections:
             # Here we use map_module_signal_to_instance_signal
@@ -1112,19 +1178,62 @@ class Parser:
             # like H1->X1. 
             # (the main_symbol and port_symbol still point to the symbol in the
             # module definition for error reporting)
-            mapped_input_signal = self.map_module_signal_to_instance_signal(local_input_signal,instance_symbol)
-            mapped_output_signal = self.map_module_signal_to_instance_signal(local_output_signal, instance_symbol)
-            self.pending_connections.append((mapped_input_signal, mapped_output_signal))
+            mapped_input_signal = self.map_module_signal_to_instance_signal(local_input_signal, instance_id)
+            mapped_output_signal = self.map_module_signal_to_instance_signal(local_output_signal, instance_id)
+
+            # Now, the modules can be inside other modules. 
+            # So we must do the same check as in parse_connect, where if the connect destination
+            # is a submodule's input/output port, we resolve it to the internal net signal. 
+
+            if(self.is_module_instance_port(mapped_output_signal)):
+                if self.module_instance_port_directions[(mapped_output_signal.main_id, mapped_output_signal.port_id)]=="input":
+                    # note self.module_instance_port_directions has all instances, even the sub-instances
+                    # and the key to the dict is the instance_id, like FA1->HA. 
+                    self.error("Module instance's input port cannot be used as a source.", mapped_output_signal.port_symbol)
+                    return False
+                mapped_output_signal = self.module_instance_ports[(mapped_output_signal.main_id, mapped_output_signal.port_id)]
+
+            if(self.is_module_instance_port(mapped_input_signal)):
+                if self.module_instance_port_directions[(mapped_input_signal.main_id, mapped_input_signal.port_id)]=="output":
+                    self.error("Module instance's output port cannot be driven from the outside.", mapped_input_signal.port_symbol)
+                    return False
+                mapped_input_signal = self.module_instance_ports[(mapped_input_signal.main_id, mapped_input_signal.port_id)]
+
+            # For recursive modules we now need this section.
+            # This is because now:
+            # the mapped_input_signal can be resolved as a net
+            # because in the stored module_definition.connections, 
+            # LHS could be a submodule port.
+            # (so it gets resolved as an internal net, despite
+            # not being in the NETS declaration) 
+
+            if self.is_net(mapped_input_signal):
+                net_id = mapped_input_signal.main_id
+                if(net_id not in self.net_driver_dict):
+                    self.net_driver_dict[net_id] = mapped_output_signal
+                else:
+                    self.error("Net has multiple drivers", mapped_input_signal.main_symbol)
+                    return False
+            else:
+                self.pending_connections.append((mapped_input_signal, mapped_output_signal))
 
         # 6. Add the module's net drivers to the overall circuit's net drivers dict
         for local_net_id, local_driving_signal in module_definition.net_driver_dict.items():
-            internal_net_id = self.make_internal_name_id_from_id(instance_symbol, local_net_id)
-            driving_signal = self.map_module_signal_to_instance_signal(local_driving_signal,instance_symbol)
+            internal_net_id = self.make_internal_name_id_from_instance_id(instance_id, local_net_id)
+            driving_signal = self.map_module_signal_to_instance_signal(local_driving_signal,instance_id)
+
+            # If the net's driving signal is a port of a sub-module, we must resolve
+            # it to the internal net signal in the main circuit. 
+            if(self.is_module_instance_port(driving_signal)):
+                if self.module_instance_port_directions[(driving_signal.main_id, driving_signal.port_id)]=="input":
+                    self.error("Module instance's input port cannot be used as a source.", driving_signal.port_symbol)
+                    return False
+                driving_signal = self.module_instance_ports[(driving_signal.main_id, driving_signal.port_id)]
+            
             self.net_driver_dict[internal_net_id] = driving_signal
 
         return True
     
-
     
 #############################################################################################
 # PARSE AND BUILD DEVICES
@@ -1195,7 +1304,7 @@ class Parser:
                 return False
             self.advance()
             for device_name in device_name_list:
-                if not self.instantiate_module(device_name, device_kind_id):
+                if not self.instantiate_module(device_name, device_kind_id, device_name.id):
                     return False
 
         return True

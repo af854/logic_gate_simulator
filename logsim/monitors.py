@@ -21,7 +21,7 @@ import collections
 #     to be different to the actual driving source name.
 #     This is useful to display the net name instead of the
 #     device name when the user creates a monitor on a net. 
-
+ 
 
 class Monitors:
 
