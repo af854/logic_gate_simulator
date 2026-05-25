@@ -1,0 +1,23 @@
+network              = "DEVICES", { device },
+                       "CONNECT", { connect },
+                       "MONITOR", { signal_list, ";" } ;
+
+device               = device_kind, name_list, ";" ;
+name_list            = name, { ",", name } ;
+signal_list          = signal, { ",", signal } ;
+
+device_kind          = parameterised_device, "(", number, ")" 
+                     | fixed_device ;
+
+parameterised_device = "AND" | "NAND" | "OR" | "NOR" | "CLOCK" | "SWITCH" ;
+fixed_device         = "DTYPE" | "XOR" ;
+
+connect              = signal_list, "=", source, ";" ;
+source               = signal | literal ;
+
+signal               = name, [ ".", name ] ;
+literal              = "0" | "1" ;
+
+(* Lexical tokens handled by the scanner *)
+name                 = letter, { letter | digit | "_" } ;
+number               = digit, { digit } ;
