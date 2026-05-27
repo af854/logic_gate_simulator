@@ -430,6 +430,39 @@ class Parser:
 
         return signal_list
 
+    def parse_connection_statement(self):
+        """Parse:
+            signal_list, '=', signal, ';'
+
+        Return:
+            (input_signal_list, output_signal)
+            or None on error.
+        """
+        input_signal_list = self.parse_signal_list()
+        if input_signal_list is None:
+            return None
+        if self.symbol.type != self.scanner.EQUALS:
+            self.error("Expected '=' in connection", synchronize=True)
+            return None
+        self.advance()
+
+        output_signal = self.parse_signal()
+        if output_signal is None:
+            return None
+
+        if self.symbol.type != self.scanner.SEMICOLON:
+            if self.symbol.type == self.scanner.COMMA:
+                self.error(
+                    "RHS of connection statement can only have one signal",
+                    synchronize=True,
+                )
+            else:
+                self.error("Expected semicolon after connection", synchronize=True)
+            return None
+
+        self.advance()
+        return input_signal_list, output_signal
+
     def parse_device_kind(self):
         """Parse device_kind in the EBNF:
         parametrised_device, \"(\", number, \")\",
@@ -488,6 +521,32 @@ class Parser:
 
         self.error("Invalid device kind.", synchronize=True)
         return None
+    
+    def parse_device_statement(self):
+        """Parse:
+            device_kind, name_list, ';'
+
+        Return:
+            (device_kind_symbol, device_kind_result, device_names)
+            or None on error.
+        """
+
+        device_kind_symbol = self.symbol
+
+        device_kind_result = self.parse_device_kind()
+        if device_kind_result is None:
+            return None
+
+        device_names = self.parse_name_list()
+        if device_names is None:
+            return None
+
+        if self.symbol.type != self.scanner.SEMICOLON:
+            self.error("No semicolon found after device definition", synchronize=True)
+            return None
+
+        self.advance()
+        return device_kind_symbol, device_kind_result, device_names
     
 #############################################################################################
 # PARSING NETS AND NET HELPER FUNCTIONS
@@ -633,10 +692,6 @@ class Parser:
 # MODULE PARSING AND STORING ModuleDefinition
 #############################################################################################
 
-    # TODO some of this may share a lot of duplicated logic with the normal parse functions
-    # try to clean up and merge methods where possible
-
-
     # Input and output sections ################################################
 
     def parse_module_ports_list(self):
@@ -691,22 +746,15 @@ class Parser:
     
     def parse_module_device(self, module_definition):
         """Parse a single device instantiation (primitive or module) inside a 
-        module's DEVICES section."""
-
-        device_kind_result = self.parse_device_kind()
-        if device_kind_result is None:
+        module's DEVICES section.
+        Return True if successful, False otherwise"""
+        
+        device_statement_result = self.parse_device_statement()
+        if device_statement_result is None:
             return False
+        _device_kind_symbol, device_kind_result, device_name_list = device_statement_result
 
-        device_names = self.parse_name_list() 
-        if device_names is None:
-            return False
-
-        if self.symbol.type != self.scanner.SEMICOLON:
-            self.error("No semicolon found after module device definition", synchronize=True)
-            return False
-        self.advance()
-
-        for device_symbol in device_names:
+        for device_symbol in device_name_list:
             device_id = device_symbol.id
             if device_id in module_definition.device_ids:
                 self.error("Device name already used in this module", device_symbol)
@@ -812,10 +860,6 @@ class Parser:
     
     # CONNECT section within module ###############################################
 
-        # TODO: a lot of this is shared with parse_connect and its helper methods. Can try to combine these
-        # by using a parameter to decide whether the context is we are writing to/checking is
-        # self.pending_connections or module_definition.connections. 
-
     def is_module_net(self, signal, module_definition):
         return not signal.is_literal and signal.main_id in module_definition.net_ids and signal.port_id is None
 
@@ -859,28 +903,10 @@ class Parser:
         
         # 1. Parse the device EBNF rule (syntax)
 
-        input_signal_list = self.parse_signal_list() 
-        if input_signal_list is None:
+        connection_statement = self.parse_connection_statement()
+        if connection_statement is None:
             return False
-
-        if self.symbol.type != self.scanner.EQUALS:
-            self.error("Expected '=' in connection", synchronize=True)
-            return False
-
-        self.advance() # consume equals
-
-        output_signal = self.parse_signal()
-        if output_signal is None:
-            return False
-
-        if self.symbol.type != self.scanner.SEMICOLON:
-            if(self.symbol.type == self.scanner.COMMA):
-                self.error("RHS of connection statement can only have one signal", synchronize=True)
-            else:
-                self.error("Expected semicolon after connection", synchronize=True)
-            return False
-
-        self.advance()
+        input_signal_list, output_signal = connection_statement
 
         # 2. Store the connections to be made, and some net semantic checks
         #     (other semantic checks performed during resolve_and_create_connections)
@@ -1325,26 +1351,13 @@ class Parser:
 
         # 1. Parse the device ebnf rule (syntax)
 
-        device_kind_symbol = self.symbol
-
-        device_kind_result = self.parse_device_kind()
-        if (device_kind_result is None):
+        device_statement_result = self.parse_device_statement()
+        if device_statement_result is None:
             return False
+        device_kind_symbol, device_kind_result, device_name_list = device_statement_result
         module_or_primitive, device_kind_id, device_parameter = device_kind_result
 
-        device_name_list = self.parse_name_list()
-        if device_name_list is None:
-            return False
-
-
-        if self.symbol.type != self.scanner.SEMICOLON:
-            self.error("No Semicolon found after device definition", synchronize=True)
-            return False
-
-        self.advance()  # Consume semicolon
-
         # 2. Actually make the device (and semantic checks)
-
 
         if(module_or_primitive == "primitive"):
             for device_name in device_name_list:  # device_name is a symbol
@@ -1412,25 +1425,10 @@ class Parser:
 
         # 1. Parse the device EBNF rule (syntax)
 
-        input_signal_list = self.parse_signal_list() 
-        if input_signal_list is None:
+        connection_statement = self.parse_connection_statement()
+        if connection_statement is None:
             return False
-
-        if self.symbol.type != self.scanner.EQUALS:
-            self.error("Expected '=' in connection", synchronize=True)
-            return False
-
-        self.advance() # consume equals
-
-        output_signal = self.parse_signal()
-        if output_signal is None:
-            return False
-
-        if self.symbol.type != self.scanner.SEMICOLON:
-            self.error("Expected semicolon after connection", synchronize=True)
-            return False
-
-        self.advance()
+        input_signal_list, output_signal = connection_statement
 
         # 2. Store the connections to be made, and some net semantic checks
         #     (other semantic checks performed during resolve_and_create_connections)
