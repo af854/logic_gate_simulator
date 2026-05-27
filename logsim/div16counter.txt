@@ -1,5 +1,3 @@
-(* Module definitions *)
-
 MODULE DIVIDE_BY_2
     INPUTS IN;
     OUTPUTS OUT;
@@ -16,9 +14,10 @@ MODULE DIVIDE_BY_2
         OUT = FF.Q;
 ENDMODULE;
 
-MODULE DIVIDE_BY_4 # module
+MODULE DIVIDE_BY_4 
     INPUTS IN;
     OUTPUTS OUT;
+
     DEVICES
         (* DIVIDE_BY_4 module instantiates two DIVIDE_BY_2 modules *)
         DIVIDE_BY_2 DIV2_0, DIV2_1; 
@@ -27,7 +26,6 @@ MODULE DIVIDE_BY_4 # module
         DIV2_1.IN = DIV2_0.OUT;
         OUT = DIV2_1.OUT;
 ENDMODULE;
-
 (* Main circuit *)
 
 DEVICES

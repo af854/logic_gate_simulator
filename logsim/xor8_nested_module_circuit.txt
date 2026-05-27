@@ -3,7 +3,7 @@ MODULE XOR2
     OUTPUTS Y;
 
     DEVICES
-        X = XOR;
+        XOR X;
 
     CONNECT
         X.I1 = A;
@@ -17,9 +17,7 @@ MODULE XOR4
     OUTPUTS Y;
 
     DEVICES
-        L = XOR2;
-        R = XOR2;
-        O = XOR2;
+        XOR2 L, R, O;
 
     CONNECT
         L.A = A0;
@@ -40,9 +38,8 @@ MODULE XOR8
     OUTPUTS Y;
 
     DEVICES
-        L = XOR4;
-        R = XOR4;
-        O = XOR2;
+        XOR4 L, R;
+        XOR2 O;
 
     CONNECT
         L.A0 = A0;
@@ -63,16 +60,8 @@ ENDMODULE;
 
 
 DEVICES
-    I0 = SWITCH(1);
-    I1 = SWITCH(0);
-    I2 = SWITCH(1);
-    I3 = SWITCH(0);
-    I4 = SWITCH(1);
-    I5 = SWITCH(0);
-    I6 = SWITCH(0);
-    I7 = SWITCH(0);
-
-    P = XOR8;
+    SWITCH(0) I0, I1, I2, I3, I4, I5, I6, I7;
+    XOR8 P;
 
 CONNECT
     P.A0 = I0;
