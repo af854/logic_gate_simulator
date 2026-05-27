@@ -4,7 +4,7 @@ MODULE DIVIDE_BY_2
     INPUTS IN;
     OUTPUTS OUT;
     DEVICES
-        FF = DTYPE;
+        DTYPE FF;
     CONNECT
         FF.DATA = FF.QBAR;
         FF.CLK = IN;
@@ -21,7 +21,7 @@ MODULE DIVIDE_BY_4 # module
     OUTPUTS OUT;
     DEVICES
         (* DIVIDE_BY_4 module instantiates two DIVIDE_BY_2 modules *)
-        DIV2_0, DIV2_1 = DIVIDE_BY_2; 
+        DIVIDE_BY_2 DIV2_0, DIV2_1; 
     CONNECT
         DIV2_0.IN = IN;
         DIV2_1.IN = DIV2_0.OUT;
@@ -31,8 +31,8 @@ ENDMODULE;
 (* Main circuit *)
 
 DEVICES
-    CLK = CLOCK(1);
-    DIV4_0, DIV4_1 = DIVIDE_BY_4;
+    CLOCK(1) CLK;
+    DIVIDE_BY_4 DIV4_0, DIV4_1;
 NETS
     CLK_16;
 CONNECT

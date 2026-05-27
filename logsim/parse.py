@@ -49,7 +49,7 @@ from parser_objects import Signal, ModuleDefinition, ModuleDevice
 #    Then we gather all the connections, 
 #    resolve all net references to their drivers,
 #    and build the connections. 
-#
+# 
 # Net implementation:
 #    Two-pass approach for building connections
 #    While parsing each connection, store it in a list. 
@@ -192,34 +192,6 @@ class Parser:
             and self.symbol_string() == name
         )
 
-    def symbol_to_string(self, symbol):
-        """Return a string representation of a symbol for debugging."""
-        # Debugging use only. For likely eventual removal (TODO)
-        token_names = {
-            self.scanner.COMMA: "COMMA",
-            self.scanner.SEMICOLON: "SEMICOLON",
-            self.scanner.EQUALS: "EQUALS",
-            self.scanner.DOT: "DOT",
-            self.scanner.L_BRACKET: "L_BRACKET",
-            self.scanner.R_BRACKET: "R_BRACKET",
-            self.scanner.KEYWORD: "KEYWORD",
-            self.scanner.NUMBER: "NUMBER",
-            self.scanner.NAME: "NAME",
-            self.scanner.EOF: "EOF",
-        }
-
-        token_type = token_names.get(symbol.type, str(symbol.type))
-
-        if symbol.id is None:
-            token_id = "None"
-        elif symbol.type == self.scanner.NUMBER:
-            # ID of a NUMBER is the literal number (no need for lookup)
-            token_id = str(symbol.id)
-        else:
-            token_id = self.names.get_name_string(symbol.id)
-
-        return token_type + " " + token_id
-
 ################################################################################
 # ERROR HANDLING / MESSAGES
 ################################################################################
@@ -231,8 +203,7 @@ class Parser:
         if (symbol == None):
             symbol = self.symbol
         self.error_count += 1
-        print("Error! " + errormsg + " | Symbol: " + self.symbol_to_string(symbol)) 
-                                                    # TODO eventually remove symbol_to_string
+        print("Error! " + errormsg) 
         print("Line " + str(symbol.line_num) + ", column " + str(symbol.line_pos)+":")
         self.scanner.print_error_line(symbol.line_num, symbol.line_pos)
 
@@ -433,9 +404,14 @@ class Parser:
             if module_name_string in self.module_definitions:
                 module_name_id = self.symbol.id
                 self.advance()
+                # Now we're pointing at the next symbol 
+                # check that it's not ( for a more helpful error message
+                # (otherwise we get error message expected a name)
+                if self.symbol.type == self.scanner.L_BRACKET:
+                    self.error("Module type should not have parentheses")
+                    return None
                 return "module", module_name_id, None
-                # TODO check that module instantiation is not followed by ()
-
+                
             self.error("Expected primitive device type (e.g. AND) or previously-defined module name")
             return None
         
@@ -616,7 +592,6 @@ class Parser:
     # Input and output sections ################################################
 
     def parse_module_ports_list(self):
-        # TODO this does not yet adhere to updated ebnf spec allowing multiple line inputs/outputs
         ports_list = self.parse_name_list()
         if ports_list is None:
             return None
@@ -633,14 +608,29 @@ class Parser:
             self.error("Expected INPUTS section in module definition")
             return None
         self.advance()
-        return self.parse_module_ports_list()
+        
+        inputs_list = []
+        while not self.is_keyword_name("OUTPUTS"):
+            ports_list = self.parse_module_ports_list()
+            if ports_list is None:
+                return None
+            inputs_list.extend(ports_list)
+        return inputs_list
 
     def parse_module_outputs_list(self):
         if not self.is_keyword_name("OUTPUTS"):
             self.error("Expected OUTPUTS section in module definition")
             return None
         self.advance()
-        return self.parse_module_ports_list()
+
+        outputs_list = []
+        while not self.is_keyword_name("DEVICES"):
+            ports_list = self.parse_module_ports_list()
+            if ports_list is None:
+                return None
+            outputs_list.extend(ports_list)
+        return outputs_list
+
     
     # DEVICES section within module #############################################
     
@@ -648,23 +638,17 @@ class Parser:
         """Parse a single device instantiation (primitive or module) inside a 
         module's DEVICES section."""
 
-        device_names = self.parse_name_list() 
-        if device_names is None:
-            return False
-
-        if self.symbol.type != self.scanner.EQUALS:
-            self.error("No equals found after module device name")
-            return False
-
-        self.advance()
         device_kind_result = self.parse_device_kind()
         if device_kind_result is None:
+            return False
+
+        device_names = self.parse_name_list() 
+        if device_names is None:
             return False
 
         if self.symbol.type != self.scanner.SEMICOLON:
             self.error("No semicolon found after module device definition")
             return False
-
         self.advance()
 
         for device_symbol in device_names:
@@ -716,7 +700,6 @@ class Parser:
             return False
 
         self.advance()
-
 
         for net_symbol in net_symbols:
             net_id = net_symbol.id
@@ -855,6 +838,15 @@ class Parser:
         if self.is_module_output_port(output_signal, module_definition):
             self.error("Module output port cannot be used as a source inside the module definition", output_signal.main_symbol)
             return False
+        if (
+            not output_signal.is_literal
+            and output_signal.main_id not in module_definition.input_ids
+            and output_signal.main_id not in module_definition.output_ids
+            and output_signal.main_id not in module_definition.net_ids
+            and output_signal.main_id not in module_definition.device_ids
+        ):
+            self.error("Signal name has not been declared in this module", output_signal.main_symbol)
+            return False
 
         for input_signal in input_signal_list:
             # If the LHS is a net, we store its RHS in net_driver_dict
@@ -870,6 +862,15 @@ class Parser:
             
             if input_signal.is_literal:
                 self.error("Literal (0 or 1) cannot be on LHS of expression", input_signal.main_symbol)
+                return False
+            
+            if (
+                input_signal.main_id not in module_definition.input_ids
+                and input_signal.main_id not in module_definition.output_ids
+                and input_signal.main_id not in module_definition.net_ids
+                and input_signal.main_id not in module_definition.device_ids
+            ):
+                self.error("Signal name has not been declared in this module", input_signal.main_symbol)
                 return False
 
             # Here we treat the module input/output ports like nets. 
@@ -895,11 +896,6 @@ class Parser:
             # pending connections list. 
             else:
                 module_definition.connections.append((input_signal, output_signal))
-
-            # TODO there's currently no check that input_signal, output_signal main name is 
-            # actually in one of the sets input_ids, output_ids, net_ids, device_ids. 
-            # In the normal parse_connect this is caught when using network.py make connection
-            # but for a module it may be better to check this first here. 
 
         return True
     
@@ -941,8 +937,25 @@ class Parser:
         if module_output_symbols is None:
             return False
         
-        # TODO add semantic check for duplicate or overlapping module input and output names 
-        
+        # Check for duplicate input port names
+        seen_input_ids = set()
+        for input_symbol in module_input_symbols:
+            if input_symbol.id in seen_input_ids:
+                self.error("Duplicate module input port name", input_symbol)
+                return False
+            seen_input_ids.add(input_symbol.id)
+
+        # Check for duplicate output port names
+        seen_output_ids = set()
+        for output_symbol in module_output_symbols:
+            if output_symbol.id in seen_output_ids:
+                self.error("Duplicate module output port name", output_symbol)
+                return False
+            if output_symbol.id in seen_input_ids:
+                self.error("Module port cannot be both input and output", output_symbol)
+                return False     
+            seen_output_ids.add(output_symbol.id)
+               
 
         module_definition = ModuleDefinition(module_name_symbol, module_input_symbols, module_output_symbols)
 
@@ -1246,16 +1259,6 @@ class Parser:
 
         # 1. Parse the device ebnf rule (syntax)
 
-        device_name_list = self.parse_name_list()
-        if device_name_list is None:
-            return False
-
-        if self.symbol.type != self.scanner.EQUALS:
-            self.error("No equals found after device name.")
-            return False
-
-        self.advance()
-
         device_kind_symbol = self.symbol
 
         device_kind_result = self.parse_device_kind()
@@ -1263,25 +1266,34 @@ class Parser:
             return False
         module_or_primitive, device_kind_id, device_parameter = device_kind_result
 
+        device_name_list = self.parse_name_list()
+        if device_name_list is None:
+            return False
+
+
+        if self.symbol.type != self.scanner.SEMICOLON:
+            self.error("No Semicolon found after device definition")
+            return False
+
+        self.advance()  # Consume semicolon
+
+        # 2. Actually make the device (and semantic checks)
+
+
         if(module_or_primitive == "primitive"):
-
-            if self.symbol.type != self.scanner.SEMICOLON:
-                self.error("No Semicolon found after device definition")
-                return False
-
-            self.advance()  # Consume semicolon
-
-            # 2. Actually make the device (and semantic checks)
-
             for device_name in device_name_list:  # device_name is a symbol
+                # check to see if device name conflicts with module name 
+                # (we already know it's not a reserved keyword)
+                device_name_string = self.names.get_name_string(device_name.id)
+                if device_name_string in self.module_definitions:
+                    self.error("Device name conflicts with a module name", device_name)
+                    return False
+
                 error_type = self.devices.make_device(
                     device_name.id,
                     device_kind_id,
                     device_parameter,
                 )
-
-                # TODO check to see if device name conflicts with module name 
-                # (we already know it's not a reserved keyword)
 
                 # string for the error message, or None if no error
                 error_message = self.device_error_message(error_type)
@@ -1299,10 +1311,6 @@ class Parser:
                     return False
                 
         elif(module_or_primitive) == "module":
-            if self.symbol.type != self.scanner.SEMICOLON:
-                self.error("No Semicolon found after module instance definition")
-                return False
-            self.advance()
             for device_name in device_name_list:
                 if not self.instantiate_module(device_name, device_kind_id, device_name.id):
                     return False
@@ -1538,9 +1546,15 @@ class Parser:
             if monitor_signal.port_symbol is not None:
                 display_name += "." + self.names.get_name_string(monitor_signal.port_id)
             
-            # Resolve the module instance port into a net name 
+            # If if's a module, resolve the module instance port into a net name 
             #   (after this, module instance port is treated like an ordinary net)
-            if self.is_module_instance_port(monitor_signal):
+            if monitor_signal.main_id in self.module_instance_ids:
+                if monitor_signal.port_id is None:
+                    self.error("Must specify an output port when monitoring a module instance", monitor_signal.main_symbol)
+                    return False
+                if not self.is_module_instance_port(monitor_signal):
+                    self.error("Port does not exist on module instance", monitor_signal.port_symbol)
+                    return False
                 if self.module_instance_port_directions[(monitor_signal.main_id, monitor_signal.port_id)] == "input":
                     self.error("Cannot monitor a module instance's input port.", monitor_signal.port_symbol)
                     return False
@@ -1564,30 +1578,27 @@ class Parser:
 
             error_message = self.monitor_error_message(error_type)
             error_symbol = self.symbol
+
             if error_message is not None:
-                if(monitor_signal.port_symbol is None):
+                device = self.devices.get_device(device_id)
+                if device is None:
+                    error_message = "Device does not exist"
+                    error_symbol = monitor_signal.main_symbol
+                elif port_id is not None and port_id not in device.outputs:
+                    error_message = "Port does not exist or is not an output port"
+                    error_symbol = monitor_signal.port_symbol
+                elif port_id is None and len(device.outputs) > 1:
+                    error_message = "Device has multiple output ports - specify which one to monitor"
+                    error_symbol = monitor_signal.main_symbol
+
+                elif monitor_signal.port_symbol is None:
                     error_symbol = monitor_signal.main_symbol
                 else:
                     error_symbol = monitor_signal.port_symbol
-                    # TODO right now, we always point to the port if it exists,
-                    # and point to the device otherwise. This is usually OK
-                    # but for DEVICE_ABSENT we might want to check if the
-                    # device is absent or the device exists but port absent,
-                    # and change this accordingly. 
-
-                    # TODO Additionally, as long as the device exists
-                    # the error message is "not a valid output" - 
-                    # could make this more helpful by making it clear
-                    # e.g. monitor FF1, FF1.I1, FF1.asdf all currently give
-                    # same error messages. This is not a huge deal but
-                    # to be more helpful we could try to
-                    # differentiate between:
-                    #      port exists but is not an output,
-                    #      port does not exist on device
-                    #      device has multiple output ports - need to specify
 
                 self.error(error_message, error_symbol)
                 return False
+            
             self.monitors.set_monitor_display_name(device_id, port_id, display_name)
         return True 
 
