@@ -55,6 +55,7 @@ from parse import Parser
 # - Option to export the monitor traces as a CSV file for analysis in Excel etc.
 # - Option to change the colour scheme (e.g. dark mode) of the waveform display for better accessibility
 # - Live tracing mode where the display updates in real time as the simulation runs, instead of only after the user clicks 'Run cycles'
+# - way to see signals inside modules, not just at the module outputs (e.g. by clicking on a module and seeing a list of all its signals that can be monitored)
 
 
 # wxPython uses ID numbers to connect shortcuts and menu events to handlers
