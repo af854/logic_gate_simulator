@@ -1,7 +1,7 @@
 DEVICES
-  SW1, SW2, SW3 = SWITCH(0);
-  XOR1, XOR2 = XOR;
-  AND1, AND2 = AND(2);
+  SWITCH(0) SW1, SW2, SW3;
+  XOR XOR1, XOR2;
+  AND(2) AND1, AND2;
   OR1 = OR(2);
 NETS
   partial_sum;

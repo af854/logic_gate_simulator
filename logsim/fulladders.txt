@@ -1,13 +1,12 @@
 MODULE FULL_ADDER
+
     INPUTS A, B, CIN;
     OUTPUTS SUM, COUT;
 
     DEVICES
-        X1 = XOR;
-        X2 = XOR;
-        A1 = AND(2);
-        A2 = AND(2);
-        O1 = OR(2);
+        XOR X1, X2;
+        AND(2) A1, A2;
+        OR(2) O1;
 
     NETS
         AXORB;
@@ -15,7 +14,6 @@ MODULE FULL_ADDER
         CARRY_PART;
 
     CONNECT
-
         O1.I1 = AB;
         O1.I2 = CARRY_PART;
         COUT = O1;
@@ -37,27 +35,23 @@ MODULE FULL_ADDER
         CARRY_PART = A2;
 
 
-
 ENDMODULE;
 
 
 DEVICES
-    A0 = SWITCH(1);
-    A1 = SWITCH(0);
-    A2 = SWITCH(1);
-    A3 = SWITCH(0);
+    SWITCH(1) A0;
+    SWITCH(0) A1;
+    SWITCH(1) A2;
+    SWITCH(0) A3;
 
-    B0 = SWITCH(1);
-    B1 = SWITCH(1);
-    B2 = SWITCH(0);
-    B3 = SWITCH(0);
+    SWITCH(1) B0;
+    SWITCH(1) B1;
+    SWITCH(0) B2;
+    SWITCH(0) B3;
 
-    CIN = SWITCH(0);
+    SWITCH(0) CIN;
 
-    FA0 = FULL_ADDER;
-    FA1 = FULL_ADDER;
-    FA2 = FULL_ADDER;
-    FA3 = FULL_ADDER;
+    FULL_ADDER FA0, FA1, FA2, FA3;
 
 NETS
     CARRY_1;
@@ -93,9 +87,9 @@ MONITOR
     B2,
     B1,
     B0,
-    CIN,
+    CIN;
+    FA3.COUT,
     FA3.SUM,
     FA2.SUM,
     FA1.SUM,
-    FA0.SUM,
-    FA3.COUT;
+    FA0.SUM;
