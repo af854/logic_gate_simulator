@@ -47,7 +47,8 @@ from parse import Parser
 # - View status messages in a scrollable box and clear the status history
 # - View the number of cycles completed since the last reset
 # - Toggle switch values between HIGH and LOW
-#
+# - Monitor signals inside modules through collapsible panes, seeing a list of all its signals that can be monitored
+
 # ----- Features to add -----
 # - File upload so that different files can be tested without restarting the program
 # - Slider that shows the value of all signals at a particular cycle that can be dragged back and forth to explore the history of the simulation
@@ -55,13 +56,34 @@ from parse import Parser
 # - Option to export the monitor traces as a CSV file for analysis in Excel etc.
 # - Option to change the colour scheme (e.g. dark mode) of the waveform display for better accessibility
 # - Live tracing mode where the display updates in real time as the simulation runs, instead of only after the user clicks 'Run cycles'
-# - way to see signals inside modules, not just at the module outputs (e.g. by clicking on a module and seeing a list of all its signals that can be monitored)
+# - Make panels collapsible if user does not want them visible, e.g. the available signals panel can be very long and is not always needed
 
 
 # wxPython uses ID numbers to connect shortcuts and menu events to handlers
 ID_RUN = wx.NewIdRef()
 ID_CLEAR_STATUS = wx.NewIdRef()
 ID_RESET_VIEW = wx.NewIdRef()
+
+
+def add_signal_to_module_tree(module_tree, full_signal_name, value):
+    """Add one arrow-separated signal name to a nested module tree."""
+    signal_parts = full_signal_name.split("->")
+    module_names = signal_parts[:-1]
+    short_signal_name = signal_parts[-1]
+    signal_list_name = "signals_at_this_level"
+    current_group = module_tree
+
+    # Step down through the modules and create missing ones
+    for module_name in module_names:
+        if module_name not in current_group:
+            current_group[module_name] = {}
+        current_group = current_group[module_name]
+
+    # Store the final signal at the lowest module level
+    if signal_list_name not in current_group:
+        current_group[signal_list_name] = []
+    current_group[signal_list_name].append((short_signal_name, value))
+
 
 ###############################################################################
 # OPENGL CANVAS
@@ -161,9 +183,16 @@ class MyGLCanvas(wxcanvas.GLCanvas):
                 size.height - 30,
             )
         else:
-            # Find maximum trace length and monitor name length to determine
-            # how to scale the display
-            monitor_count = len(self.monitors.monitors_dictionary)
+            # The monitor dictionary only stores real traces
+            # The waveform display needs heading rows for modules so make a separate list of rows to draw
+            display_rows = self.get_monitor_display_rows()
+
+            # Headings are shorter than traces
+            # Adding the row heights gives the amount of vertical space needed by the whole display
+            display_height = 0
+            for display_row in display_rows:
+                display_height += display_row["height"]
+
             max_trace_length = 0
             for trace in self.monitors.monitors_dictionary.values():
                 trace_length = len(trace)
@@ -171,12 +200,8 @@ class MyGLCanvas(wxcanvas.GLCanvas):
                     max_trace_length = trace_length
 
             max_name_length = 0
-            for device_id, output_id in self.monitors.monitors_dictionary:
-                monitor_name = self.monitors.get_monitor_display_name(
-                    device_id,
-                    output_id,
-                )
-                name_length = len(monitor_name)
+            for row in display_rows:
+                name_length = len(row["label"])
                 if name_length > max_name_length:
                     max_name_length = name_length
 
@@ -207,7 +232,8 @@ class MyGLCanvas(wxcanvas.GLCanvas):
             if available_height < 1:
                 available_height = 1
 
-            row_gap = available_height / monitor_count
+            # Use the total display height, not just the number of rows somodule headings can sit closer to the signals below them
+            row_gap = available_height / display_height
             if row_gap > 60:
                 row_gap = 60
             if row_gap < 50:
@@ -221,35 +247,34 @@ class MyGLCanvas(wxcanvas.GLCanvas):
                 amplitude = 12
 
             top_y = size.height - 95
-            bottom_y = top_y - (monitor_count - 1) * row_gap
+            bottom_y = top_y - (display_height - 1) * row_gap
             top_axis_y = top_y + amplitude + 24
 
             # Draw the cycle axis once, then draw each signal below it
             self.draw_cycle_axis(max_trace_length, start_x, top_axis_y, bottom_y, top_y + amplitude, step)
 
-            row = 0
-            for monitor_key, trace in (
-                self.monitors.monitors_dictionary.items()
-            ):
-                device_id, output_id = monitor_key
-
-                low_y = top_y - row * row_gap
+            # headings have height 0.35, signal traces have height 1
+            row_position = 0
+            for display_row in display_rows:
+                low_y = top_y - row_position * row_gap
                 high_y = low_y + amplitude
 
-                # Use the monitor's display name so nets can keep their alias
-                signal_name = self.monitors.get_monitor_display_name(
-                    device_id,
-                    output_id,
-                )
-                self.render_text(signal_name, 10, low_y + amplitude / 2 - 4, colour=(0.12, 0.14, 0.16))
+                if display_row["kind"] == "heading":
+                    # heading labels a module
+                    # It doesn't have a trace so only draw the text and then move down by its height
+                    self.render_text(display_row["label"], 10, low_y + amplitude / 2 - 4, colour=(0.36, 0.40, 0.46))
+                    row_position += display_row["height"]
+                    continue
+
+                self.render_text(display_row["label"], 10, low_y + amplitude / 2 - 4, colour=(0.12, 0.14, 0.16))
                 self.draw_value_axis(start_x, low_y, high_y, step, max_trace_length)
 
                 # Draw the actual signal trace on top of the axes and grid
                 GL.glColor3f(0.11, 0.30, 0.85)
                 GL.glLineWidth(2.0)
-                self.draw_trace(trace, start_x, low_y, high_y, step)
+                self.draw_trace(display_row["trace"], start_x, low_y, high_y, step)
                 GL.glLineWidth(1.0)
-                row += 1
+                row_position += display_row["height"]
 
         # We have been drawing to the back buffer, flush the graphics pipeline
         # and swap the back buffer to the front
@@ -350,6 +375,56 @@ class MyGLCanvas(wxcanvas.GLCanvas):
                 GL.glRasterPos2f(x_pos, y_pos)
             else:
                 GLUT.glutBitmapCharacter(font, ord(character))
+
+    def get_monitor_display_rows(self):
+        """Return grouped rows for waveform monitor labels and traces."""
+        rows = []
+        module_tree = {}
+
+        # First build a small tree from monitor names containing ->
+        # e.g. A->B->Q becomes module A inside module B signal Q
+        for monitor_key, trace in self.monitors.monitors_dictionary.items():
+            device_id, output_id = monitor_key
+            monitor_name = self.monitors.get_monitor_display_name(device_id, output_id)
+
+            if "->" not in monitor_name:
+                # Top level signals do not need a heading so draw directly as normal trace rows
+                rows.append({"kind": "trace",
+                             "label": monitor_name,
+                             "trace": trace,
+                             "height": 1})
+                continue
+
+            add_signal_to_module_tree(module_tree, monitor_name, trace)
+
+        # now flatten the tree into drawing rows  
+        # This keeps the render() method simple because it only has to loop over one list
+        self.add_module_monitor_display_rows(rows, module_tree, 0)
+        return rows
+
+    def add_module_monitor_display_rows(self, rows, signal_group, depth):
+        """Append heading and trace rows for one module signal group."""
+        indent = "  " * depth
+
+        for module_name in sorted(signal_group):
+            if module_name == "signals_at_this_level":
+                continue
+
+            # Headings are given a smaller height
+            rows.append({"kind": "heading",
+                         "label": indent + module_name,
+                         "height": 0.35})
+
+            child_group = signal_group[module_name]
+            child_indent = "  " * (depth + 1)
+
+            for signal_name, trace in sorted(child_group.get("signals_at_this_level", [])):
+                rows.append({"kind": "trace",
+                             "label": child_indent + signal_name,
+                             "trace": trace,
+                             "height": 1})
+
+            self.add_module_monitor_display_rows(rows, child_group, depth + 1)
 
     def signal_to_y(self, signal, low_y, high_y):
         """Convert a signal value into a y-position."""
@@ -526,6 +601,7 @@ class Gui(wx.Frame):
         self.reset_button = wx.Button(self, wx.ID_ANY, "Reset simulation")
         self.clear_traces_button = wx.Button(self, wx.ID_ANY, "Clear traces")
         self.status_box = wx.TextCtrl(self, wx.ID_ANY, "", style=wx.TE_MULTILINE | wx.TE_READONLY)
+        self.status_box.SetMinSize((-1, 90))
         self.clear_status_button = wx.Button(self, wx.ID_ANY, "Clear status")
         self.switch_rows = wx.ScrolledWindow(self, wx.ID_ANY, style=wx.VSCROLL | wx.BORDER_SIMPLE)
         self.switch_rows.SetScrollRate(0, 10)
@@ -543,15 +619,42 @@ class Gui(wx.Frame):
         if self.monitor_box.GetCount() > 0:
             self.monitor_box.SetSelection(0)
         self.add_monitor_button = wx.Button(self, wx.ID_ANY, "Add Monitor")
+
+        # The old ComboBox and add button are hidden rather than deleted
+        # add_monitor() already uses them so the new 'Available signals' panel can reuse that tested code path by setting the comboBox value first
+        self.monitor_box.Hide()
+        self.add_monitor_button.Hide()
+
+        # This is the visible monitor picker
+        self.module_signal_rows = wx.ScrolledWindow(self, wx.ID_ANY, style=wx.VSCROLL | wx.BORDER_SIMPLE)
+        self.module_signal_rows.SetScrollRate(0, 10)
+        self.module_signal_rows.SetMinSize((220, 420))
+        self.module_signal_rows_sizer = wx.BoxSizer(wx.VERTICAL)
+        self.module_signal_rows.SetSizer(self.module_signal_rows_sizer)
+
+        # These dictionaries connect buttons and panes back to signal names or module paths
+        self.module_signal_button_names = {}
+        self.module_signal_action_buttons = {}
+        self.module_signal_pane_paths = {}
+        self.module_signal_expanded_paths = set()
+
+        # When add/remove is clicked from the available signals panel, only the clicked button should change
+        # Rebuilding the full panel caused visible flicker so this flag skips that rebuild during add_monitor()
+        self.suppress_available_signal_refresh = False
+
         self.monitor_rows = wx.ScrolledWindow(
             self,
             wx.ID_ANY,
             style=wx.VSCROLL | wx.BORDER_SIMPLE,
         )
         self.monitor_rows.SetScrollRate(0, 10)
+        self.monitor_rows.SetMinSize((-1, 100))
         self.monitor_rows_sizer = wx.BoxSizer(wx.VERTICAL)
         self.monitor_rows.SetSizer(self.monitor_rows_sizer)
         self.monitor_button_keys = {}
+
+        # The separate active monitors panel is hidden because the available signal list now shows add or remove next to each signal
+        self.monitor_rows.Hide()
 
         self.zoom_in_button = wx.Button(self, wx.ID_ANY, "Zoom in")
         self.zoom_out_button = wx.Button(self, wx.ID_ANY, "Zoom out")
@@ -585,9 +688,6 @@ class Gui(wx.Frame):
         left_side_sizer = wx.BoxSizer(wx.VERTICAL)
         right_side_sizer = wx.BoxSizer(wx.VERTICAL)
 
-        main_sizer.Add(self.canvas, 4, wx.EXPAND | wx.ALL, 5)
-        main_sizer.Add(side_sizer, 0, wx.EXPAND | wx.ALL, 8)
-
         simulation_sizer = wx.StaticBoxSizer(wx.StaticBox(self, wx.ID_ANY, "Simulation"), wx.VERTICAL)
         simulation_sizer.Add(self.text, 0, wx.LEFT | wx.RIGHT | wx.TOP, 6)
         simulation_sizer.Add(self.spin, 0, wx.EXPAND | wx.ALL, 6)
@@ -599,10 +699,8 @@ class Gui(wx.Frame):
         switch_sizer = wx.StaticBoxSizer(wx.StaticBox(self, wx.ID_ANY, "Switches"), wx.VERTICAL)
         switch_sizer.Add(self.switch_rows, 1, wx.EXPAND | wx.ALL, 6)
 
-        monitor_sizer = wx.StaticBoxSizer(wx.StaticBox(self, wx.ID_ANY, "Monitors"), wx.VERTICAL)
-        monitor_sizer.Add(self.monitor_box, 0, wx.EXPAND | wx.ALL, 6)
-        monitor_sizer.Add(self.add_monitor_button, 0, wx.EXPAND | wx.ALL, 6)
-        monitor_sizer.Add(self.monitor_rows, 1, wx.EXPAND | wx.ALL, 6)
+        signal_sizer = wx.StaticBoxSizer(wx.StaticBox(self, wx.ID_ANY, "Available signals"), wx.VERTICAL)
+        signal_sizer.Add(self.module_signal_rows, 1, wx.EXPAND | wx.ALL, 6)
 
         zoom_sizer = wx.StaticBoxSizer(wx.StaticBox(self, wx.ID_ANY, "View"), wx.VERTICAL)
         zoom_sizer.Add(self.zoom_in_button, 0, wx.EXPAND | wx.ALL, 6)
@@ -617,15 +715,18 @@ class Gui(wx.Frame):
         left_side_sizer.Add(switch_sizer, 1, wx.EXPAND | wx.BOTTOM, 8)
         left_side_sizer.Add(zoom_sizer, 0, wx.EXPAND)
 
-        right_side_sizer.Add(monitor_sizer, 1, wx.EXPAND | wx.BOTTOM, 8)
-        right_side_sizer.Add(status_sizer, 1, wx.EXPAND)
+        right_side_sizer.Add(status_sizer, 0, wx.EXPAND)
 
         side_sizer.Add(left_side_sizer, 0, wx.EXPAND | wx.RIGHT, 8)
         side_sizer.Add(right_side_sizer, 0, wx.EXPAND)
 
+        main_sizer.Add(signal_sizer, 0, wx.EXPAND | wx.ALL, 8)
+        main_sizer.Add(self.canvas, 4, wx.EXPAND | wx.ALL, 5)
+        main_sizer.Add(side_sizer, 0, wx.EXPAND | wx.ALL, 8)
+
         self.SetSizer(main_sizer)
         self.update_switch_rows()
-        self.update_monitor_rows()
+        self.update_module_signal_rows()
 
         # Prevent the user from shrinking the window so much that the controls or canvas become unusable
         main_sizer.SetSizeHints(self)
@@ -824,6 +925,30 @@ class Gui(wx.Frame):
 
         return signal_names
 
+    def get_module_signal_groups(self):
+        """Return internal module output signals as a nested tree."""
+        module_signal_groups = {}
+
+        # The parser names internal module signals with ->
+        # The GUI keeps that as the internal name but presents it as collapsed module panes so the user doesn't read long arrow separated strings
+        for signal_name in self.get_output_signal_names():
+            if "->" not in signal_name:
+                continue
+
+            add_signal_to_module_tree(module_signal_groups, signal_name, signal_name)
+
+        return module_signal_groups
+
+    def get_top_level_signal_names(self):
+        """Return output signals that are not inside an expanded module."""
+        signal_names = []
+
+        for signal_name in self.get_output_signal_names():
+            if "->" not in signal_name:
+                signal_names.append(signal_name)
+
+        return signal_names
+
     def update_switch_rows(self):
         """Refresh the switch list."""
         # Clear the old rows and rebuild them
@@ -859,6 +984,115 @@ class Gui(wx.Frame):
         self.monitor_box.SetItems(self.get_output_signal_names())
         if self.monitor_box.GetCount() > 0:
             self.monitor_box.SetSelection(0)
+        self.update_module_signal_rows()
+
+    def update_module_signal_rows(self):
+        """Refresh the available monitor signal list."""
+        # The list is rebuilt when the available signals really change
+        # Save open/closed pane state first so user navigation is not lost
+        self.store_module_signal_pane_state()
+        scroll_x, scroll_y = self.module_signal_rows.GetViewStart()
+        self.module_signal_rows_sizer.Clear(delete_windows=True)
+        self.module_signal_button_names = {}
+        self.module_signal_action_buttons = {}
+        self.module_signal_pane_paths = {}
+
+        top_level_signal_names = self.get_top_level_signal_names()
+        module_signal_groups = self.get_module_signal_groups()
+
+        if not top_level_signal_names and not module_signal_groups:
+            empty_label = wx.StaticText(self.module_signal_rows, wx.ID_ANY, "No monitorable signals")
+            empty_label.SetForegroundColour(wx.Colour(95, 99, 104))
+            self.module_signal_rows_sizer.Add(empty_label, 0, wx.ALL, 6)
+        else:
+            for signal_name in sorted(top_level_signal_names):
+                self.add_available_signal_row(self.module_signal_rows, self.module_signal_rows_sizer, signal_name, signal_name)
+
+            self.add_module_signal_group_rows(self.module_signal_rows, self.module_signal_rows_sizer, module_signal_groups,())
+
+        self.module_signal_rows.Layout()
+        self.module_signal_rows.FitInside()
+        self.module_signal_rows.Scroll(scroll_x, scroll_y)
+
+    def add_module_signal_group_rows(self, parent, parent_sizer, signal_group, parent_path):
+        """Add nested module panes and signal rows to a sizer."""
+        for signal_name, full_signal_name in sorted(signal_group.get("signals_at_this_level", [])):
+            self.add_available_signal_row(parent, parent_sizer, signal_name, full_signal_name)
+
+        for module_name in sorted(signal_group):
+            if module_name == "signals_at_this_level":
+                continue
+
+            # Each module becomes one collapsible pane  
+            # Signals stored inside that module are added to the pane recursively
+            collapsible_pane = wx.CollapsiblePane(parent, wx.ID_ANY, module_name)
+            pane = collapsible_pane.GetPane()
+            pane_sizer = wx.BoxSizer(wx.VERTICAL)
+            module_path = parent_path + (module_name,)
+
+            self.add_module_signal_group_rows(pane, pane_sizer, signal_group[module_name], module_path)
+
+            pane.SetSizer(pane_sizer)
+
+            # Store the module path e.g. ("DIV4_0", "DIV2_0") so the GUI can remember which pane was expanded
+            self.module_signal_pane_paths[collapsible_pane.GetId()] = (collapsible_pane, module_path)
+            if module_path in self.module_signal_expanded_paths:
+                collapsible_pane.Collapse(False)
+
+            collapsible_pane.Bind(wx.EVT_COLLAPSIBLEPANE_CHANGED, self.on_module_signal_pane_changed)
+            parent_sizer.Add(collapsible_pane, 0, wx.EXPAND | wx.ALL, 4)
+
+    def store_module_signal_pane_state(self):
+        """Remember which module panes are expanded before rebuilding."""
+        for pane, module_path in self.module_signal_pane_paths.values():
+            if pane.IsExpanded():
+                self.module_signal_expanded_paths.add(module_path)
+            else:
+                self.module_signal_expanded_paths.discard(module_path)
+
+    def add_available_signal_row(self, parent, parent_sizer, label_text, signal_name):
+        """Add one available signal row with a monitor action."""
+        row_sizer = wx.BoxSizer(wx.HORIZONTAL)
+        label = wx.StaticText(parent, wx.ID_ANY, label_text)
+
+        # row always has one button
+        # Its label and handler are set by update_available_signal_button() depending on whether the signal is already monitored
+        action_button = wx.Button(parent, wx.ID_ANY, "")
+        self.module_signal_button_names[action_button.GetId()] = signal_name
+        self.module_signal_action_buttons[signal_name] = action_button
+        self.update_available_signal_button(action_button, signal_name)
+
+        row_sizer.Add(label, 1, wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, 4)
+        row_sizer.Add(action_button, 0)
+        parent_sizer.Add(row_sizer, 0, wx.EXPAND | wx.ALL, 4)
+
+    def update_available_signal_button(self, button, signal_name):
+        """Set one available signal button to Add or Remove."""
+        # The same button changes job after it is clicked so remove the old event binding before attaching the new add or remove handler
+        button.Unbind(wx.EVT_BUTTON)
+
+        if self.is_signal_monitored(signal_name):
+            action_label = "Remove"
+            action_handler = self.on_delete_module_signal_button
+            button_foreground = wx.Colour(255, 15, 15)
+        else:
+            action_label = "Add"
+            action_handler = self.on_add_module_signal_button
+            button_foreground = wx.Colour(67, 150, 95)
+
+        button.SetLabel(action_label)
+        button.SetBackgroundColour(wx.Colour(255, 255, 255))
+        button.SetForegroundColour(button_foreground)
+        button.Bind(wx.EVT_BUTTON, action_handler)
+        button.Refresh()
+
+    def is_signal_monitored(self, signal_name):
+        """Return True if a signal name is currently monitored."""
+        signal_ids = self.get_signal_ids(signal_name)
+        if signal_ids is None:
+            return False
+
+        return tuple(signal_ids) in self.monitors.monitors_dictionary
 
     def update_monitor_rows(self):
         """Refresh the active monitor list."""
@@ -932,6 +1166,64 @@ class Gui(wx.Frame):
         else:
             self.show_status(f"Error: could not set {switch_name}.")
 
+    def on_module_signal_pane_changed(self, event):
+        """Resize the module signal list when a module is expanded."""
+        pane = event.GetEventObject()
+        pane_data = self.module_signal_pane_paths.get(pane.GetId())
+        if pane_data is not None:
+            # Update the stored pane state immediately
+            # This means the same panes can be reopened after the list is rebuilt
+            module_path = pane_data[1]
+            if pane.IsExpanded():
+                self.module_signal_expanded_paths.add(module_path)
+            else:
+                self.module_signal_expanded_paths.discard(module_path)
+
+        self.module_signal_rows.Layout()
+        self.module_signal_rows.FitInside()
+        event.Skip()
+
+    def on_add_module_signal_button(self, event):
+        """Add a monitor from the available signal list."""
+        button_id = event.GetId()
+        signal_name = self.module_signal_button_names[button_id]
+
+        # Reuse add_monitor() by putting the selected signal into the hidden comboBox that add_monitor() already reads from
+        self.monitor_box.SetValue(signal_name)
+
+        # add_monitor() normally refreshes the whole monitor UI
+        # Skipping the available signal rebuild to avoid the flicker, then update just the clicked button
+        self.suppress_available_signal_refresh = True
+        try:
+            self.add_monitor()
+        finally:
+            self.suppress_available_signal_refresh = False
+
+        button = self.module_signal_action_buttons[signal_name]
+        self.update_available_signal_button(button, signal_name)
+
+    def on_delete_module_signal_button(self, event):
+        """Remove a monitor from the available signal list."""
+        button_id = event.GetId()
+        signal_name = self.module_signal_button_names[button_id]
+        signal_ids = self.get_signal_ids(signal_name)
+
+        if signal_ids is None:
+            self.show_status(f"Error: unknown signal '{signal_name}'.")
+            return
+
+        device_id, output_id = signal_ids
+
+        if self.monitors.remove_monitor(device_id, output_id):
+            self.show_status(f"Removed monitor for {signal_name}.")
+        else:
+            self.show_status(f"Error: {signal_name} is not monitored.")
+
+        # Removing a monitor changes only this row in the available signals panel so update this button instead of rebuilding the full panel
+        button = self.module_signal_action_buttons[signal_name]
+        self.update_available_signal_button(button, signal_name)
+        self.canvas.render()
+
     def add_monitor(self):
         """Add the selected signal to the monitor list."""
         monitor_name = self.monitor_box.GetValue().strip()
@@ -958,7 +1250,12 @@ class Gui(wx.Frame):
         # confirm success if it works
         if error_type == self.monitors.NO_ERROR:
             self.show_status(f"Added monitor for {monitor_name}.")
-            self.update_monitor_rows()
+            # Normal monitor additions rebuild the available signal list
+            # Sidebar button clicks set suppress_available_signal_refresh so only the clicked button is updated, which prevents flicker
+            if (hasattr(self, "update_module_signal_rows") and not self.suppress_available_signal_refresh):
+                self.update_module_signal_rows()
+            if hasattr(self, "update_monitor_rows"):
+                self.update_monitor_rows()
         elif error_type == self.monitors.MONITOR_PRESENT:
             existing_name = self.monitors.get_monitor_display_name(
                 device_id,
