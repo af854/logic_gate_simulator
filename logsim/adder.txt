@@ -2,7 +2,7 @@ DEVICES
   SWITCH(0) SW1, SW2, SW3;
   XOR XOR1, XOR2;
   AND(2) AND1, AND2;
-  OR1 = OR(2);
+  OR(2) OR1;
 NETS
   partial_sum;
 
@@ -25,4 +25,3 @@ CONNECT
 
 MONITOR
   partial_sum, XOR2, OR1;
-

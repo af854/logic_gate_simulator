@@ -78,7 +78,8 @@ def main(arg_list):
             # Initialise an instance of the gui.Gui() class
             app = wx.App()
             gui = Gui("Logic Simulator", path, names, devices, network,
-                      monitors)
+                      monitors, parser.net_driver_dict)     
+                        # Tiny change by Kevin, pass net_driver_dict to GUI
             gui.Show(True)
             app.MainLoop()
 

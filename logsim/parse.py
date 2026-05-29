@@ -60,10 +60,6 @@ MAX_ERROR_MSGS = 20
 #    to the actual output port that drives the net.
 #    Two pass approach is needed since nets can be used before they
 #    are driven. 
-#    TODO Known issue: add/zap monitor can't handle nets since
-#    everything is currently handled parser-side. And we can't 
-#    monitor an output and a net connected to this output
-#    at the same time. 
 #
 # Literal implementation:
 #    We create a SWITCH(0) or SWITCH(1) device, used internally only
@@ -109,15 +105,13 @@ MAX_ERROR_MSGS = 20
 #    Certain structural errors (e.g. missing or out of order section keywords)
 #    may cause an "fatal" error and stops parsing. 
 # 
-#    If an error is found in a module definition, the definition is not
-#    stored so instantiating this module will not be possible.
-#    This is to prevent every further instantiation attempt
-#    of this module failing in the same manner.
+#    Once the first error is found, attempts to build the network are abandoned
+#    as per the client specification. Only syntax checks will be performed
+#    for the remainder of the file. 
 # 
 #     
 #   
 #    TODO combinational loop checks
-#    TODO sort out monitors for signals within module instance
 #    TODO PEP8 formatting compliance and finish docstrings
 
 class Parser:
@@ -236,9 +230,8 @@ class Parser:
             print("Line " + str(symbol.line_num+1) + ", column " + str(symbol.line_pos+1)+":")
             self.scanner.print_error_line(symbol.line_num, symbol.line_pos)
             if(self.error_count == 1):
-                print("Attempting to skip the affected statement(s) and continue to")
-                print("build the network on a \'best-effort\' basis to detect other errors")
-                print("This may cause device/connection/module declarations to be absent.")
+                print("Attempting to skip the affected statement(s) and continue parsing")
+                print("to detect further syntax errors. Network construction will not be \nattempted.")
         if(synchronize):
             self.synchronise(stopping_types)
 
@@ -248,9 +241,13 @@ class Parser:
             print("And "+str(self.error_count-MAX_ERROR_MSGS)+" more error(s)...")
             print("---------------------------------------------------------------")
         print("---------------------------------------------------------------")
-        print("Parsing stopped with "+str(self.error_count)+" errors: unable to continue.")
+        print("Parsing stopped with "+str(self.error_count)+" errors: unable to continue due to")
+        print("structural error(s) in file.")
         
 
+    def can_build_network(self):
+        """Return True if network construction is still allowed."""
+        return self.error_count == 0
     # Deal with an error from Devices class
     def device_error_message(self, error_type):
         """Translate devices error code into a useful message."""
@@ -478,7 +475,9 @@ class Parser:
         if self.symbol.type == self.scanner.NAME: 
             # Then it should be a module name 
             module_name_string = self.names.get_name_string(self.symbol.id)
-            if module_name_string in self.module_definitions:
+
+            if module_name_string in self.module_definitions or not self.can_build_network():
+                                                                # if we can't build the network, syntax check only
                 module_name_id = self.symbol.id
                 self.advance()
                 # Now we're pointing at the next symbol 
@@ -653,6 +652,10 @@ class Parser:
         # We create artificial SWITCH(0) and SWITCH(1) with an internal
         # switch name @LITERAL_0 or @LITERAL_1
         # and use that to provide the literal signal.
+
+        if not self.can_build_network():
+            return None
+        
         if not signal.is_literal:
             self.error("Internal error: get_or_create_const_switch called on a non-literal signal", signal.main_symbol)
 
@@ -908,6 +911,9 @@ class Parser:
             return False
         input_signal_list, output_signal = connection_statement
 
+        if not self.can_build_network():
+            return True
+
         # 2. Store the connections to be made, and some net semantic checks
         #     (other semantic checks performed during resolve_and_create_connections)
 
@@ -931,6 +937,8 @@ class Parser:
             return False
 
         for input_signal in input_signal_list:
+            if not self.can_build_network():
+                continue
             # If the LHS is a net, we store its RHS in net_driver_dict
             # (RHS can also be a net, this will be flattened with a call
             # to flatten_net_driver_dict during resolve_and_create_connections)
@@ -1080,6 +1088,14 @@ class Parser:
             self.error("No semicolon found after ENDMODULE")
             return False
         self.advance()
+
+        if module_error_count > 0:
+            return True
+
+        if self.error_count > module_error_count:
+            print("---------------------------------------------------------------")
+            print("Module definition for "+module_name_string+" is invalid due to the above error(s).\n")            
+            return False
 
         if not self.flatten_module_net_driver_dict(module_definition):
             return False
@@ -1368,6 +1384,9 @@ class Parser:
                     self.error("Device name conflicts with a module name", device_name)
                     continue
 
+                if not self.can_build_network():
+                    continue
+
                 error_type = self.devices.make_device(
                     device_name.id,
                     device_kind_id,
@@ -1391,6 +1410,8 @@ class Parser:
                 
         elif(module_or_primitive) == "module":
             for device_name in device_name_list:
+                if not self.can_build_network():
+                    continue
                 if not self.instantiate_module(device_name, device_kind_id, device_name.id):
                     continue
 
@@ -1430,6 +1451,9 @@ class Parser:
             return False
         input_signal_list, output_signal = connection_statement
 
+        if not self.can_build_network():
+            return True
+
         # 2. Store the connections to be made, and some net semantic checks
         #     (other semantic checks performed during resolve_and_create_connections)
 
@@ -1452,6 +1476,8 @@ class Parser:
 
 
         for input_signal in input_signal_list:
+            if not self.can_build_network():
+                continue
             # If the LHS is a net, we store its RHS in net_driver_dict
             # (RHS can also be a net, this will be flattened with a call
             # to flatten_net_driver_dict during resolve_and_create_connections)
@@ -1489,13 +1515,18 @@ class Parser:
         """Resolve all net references in pending_connections, 
         then create all the connections in the network. Return True if successful, False otherwise"""
 
+        if not self.can_build_network():
+            return True
+
         if not self.flatten_net_driver_dict():
-            return False
+            return True
         
         # TODO net unused / not connected to anything checks
         # may want to keep track of the net instantiation symbols for this
 
         for connection in self.pending_connections:
+            if not self.can_build_network():
+                continue
             input_signal, output_signal = connection
 
             input_device_id = input_signal.main_id
@@ -1559,7 +1590,9 @@ class Parser:
          return True if successful."""
         while True:
             if self.is_keyword_name("MONITOR"):
-                return self.resolve_and_create_connections()
+                if self.can_build_network():
+                    return self.resolve_and_create_connections()
+                return True
 
             if self.symbol.type == self.scanner.EOF or self.is_section_keyword():
                 self.error("Incorrect structure - CONNECT section should be followed by MONITOR section")
@@ -1600,14 +1633,19 @@ class Parser:
 
         # 2. create the monitors and detect semantic errors
 
+        if not self.can_build_network():
+            return True
+
         for monitor_signal in all_monitors_list:
+            if not self.can_build_network():
+                continue
 
             # The display name for the monitor should be the actual name of the net
             # specified, if the user wants to monitor a net. Thus we store
             # the display name before we resolve the net
-            display_name = self.names.get_name_string(monitor_signal.main_id)
+            requested_name = self.names.get_name_string(monitor_signal.main_id)
             if monitor_signal.port_symbol is not None:
-                display_name += "." + self.names.get_name_string(monitor_signal.port_id)
+                requested_name += "." + self.names.get_name_string(monitor_signal.port_id)
             
             # If if's a module, resolve the module instance port into a net name 
             #   (after this, module instance port is treated like an ordinary net)
@@ -1637,7 +1675,7 @@ class Parser:
             device_id = monitor_signal.main_id
             port_id = monitor_signal.port_id
             
-            error_type = self.monitors.make_monitor(device_id, port_id)
+            error_type = self.monitors.make_monitor(device_id, port_id, requested_name=requested_name)
 
             error_message = self.monitor_error_message(error_type)
             error_symbol = self.symbol
@@ -1662,7 +1700,6 @@ class Parser:
                 self.error(error_message, error_symbol)
                 continue
             
-            self.monitors.set_monitor_display_name(device_id, port_id, display_name)
         return True 
 
 #############################################################################################
@@ -1749,9 +1786,7 @@ class Parser:
                     print("---------------------------------------------------------------")
                 print("*** ERROR: " + str(self.error_count) + " error(s) found during parsing. ***\n")
                 print("Simulation will not start until the definition file is fixed.")
-                if(self.error_count > 1):
-                    print("It is recommended to start from the first error, as this may resolve\nfurther errors. ")
-                print("")
+
                 return False
         
         except Exception:

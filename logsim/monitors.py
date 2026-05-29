@@ -10,17 +10,32 @@ Monitors - records and displays specified output signals.
 """
 import collections
 
-# Slight changes made by Kevin: 
+# Changes made by Kevin: 
 # 1. 
 #     Due to separation of network.DEVICE_ABSENT into 
 #     FIRST_DEVICE_ABSENT and SECOND_DEVICE_ABSENT
 #     in network.py, we remove usage of network.DEVICE_ABSENT
 #     and replace with a separate DEVICE_ABSENT in the Monitors class.
 # 2.  
-#     Add functionality for the display_name for a monitor
-#     to be different to the actual driving source name.
-#     This is useful to display the net name instead of the
-#     device name when the user creates a monitor on a net. 
+#     Restructure how a Monitor is stored with a new object - 
+#     this is to allow the proper display name for a monitored
+#     net, allow monitoring a net and its driving device
+#     together without monitor already exists error, etc.
+
+class Monitor:
+
+    """An object representing a Monitor.
+     
+      This class contains a requested_name field to keep track of whether the monitor was
+      targetting the output device directly or a net driven by the output device. 
+      """
+    def __init__(self, requested_name, device_id, output_id, blank_signal,
+                 cycles_completed=0):
+
+        self.requested_name = requested_name
+        self.device_id = device_id
+        self.output_id = output_id
+        self.trace = [blank_signal] * cycles_completed
  
 
 class Monitors:
@@ -65,20 +80,15 @@ class Monitors:
         self.network = network
         self.devices = devices
 
-        # monitors_dictionary stores
-        # {(device_id, output_id): [signal_list]}
+        # monitors_dictionary maps requested_name -> Monitor object.
+        # The requested name is what the user wrote or selected, possibly a net
+        # name. The Monitor stores the resolved real device/output to sample.
         self.monitors_dictionary = collections.OrderedDict()
-
-        # Some monitors are referred to by the net name, e.g. partial_sum
-        # and resolved to the driver name, like XOR.
-        # This dictionary allows storage of the net name / user-facing name
-        # that should be displayed in the GUI.
-        self.monitor_display_names = {}
 
         [self.NO_ERROR, self.NOT_OUTPUT,
          self.MONITOR_PRESENT, self.DEVICE_ABSENT] = self.names.unique_error_codes(4)
-
-    def make_monitor(self, device_id, output_id, cycles_completed=0):
+    
+    def make_monitor(self, device_id, output_id, requested_name, cycles_completed=0):
         """Add the specified signal to the monitors dictionary.
 
         Return NO_ERROR if successful, or the corresponding error if not.
@@ -88,74 +98,73 @@ class Monitors:
             return self.DEVICE_ABSENT
         elif output_id not in monitor_device.outputs:
             return self.NOT_OUTPUT
-        elif (device_id, output_id) in self.monitors_dictionary:
+        if requested_name in self.monitors_dictionary:
             return self.MONITOR_PRESENT
         else:
             # If n simulation cycles have been completed before making this
             # monitor, then initialise the signal trace with an n-length list
             # of BLANK signals. Otherwise, initialise the trace with an empty
             # list.
-            self.monitors_dictionary[(device_id, output_id)] = [
-                self.devices.BLANK] * cycles_completed
-            return self.NO_ERROR
+            self.monitors_dictionary[requested_name] = Monitor(
+            requested_name,
+            device_id,
+            output_id,
+            self.devices.BLANK,
+            cycles_completed,
+        )
+        return self.NO_ERROR
 
-    def remove_monitor(self, device_id, output_id):
-        """Remove the specified signal from the monitors dictionary.
+    def remove_monitor(self, requested_name):
+        """Remove the specified monitor.
 
         Return True if successful.
         """
-        if (device_id, output_id) not in self.monitors_dictionary:
+        if requested_name not in self.monitors_dictionary:
             return False
-        else:
-            del self.monitors_dictionary[(device_id, output_id)]
-            return True
 
-    def get_monitor_signal(self, device_id, output_id):
+        del self.monitors_dictionary[requested_name]
+        return True
+
+    def get_monitor_signal(self, requested_name):
         """Return the signal level of the specified monitor.
 
         If the monitor does not exist, return None.
         """
-        if (device_id, output_id) in self.monitors_dictionary:
-            return self.network.get_output_signal(device_id, output_id)
-        else:
+        monitor = self.monitors_dictionary.get(requested_name)
+        if monitor is None:
             return None
+
+        return self.network.get_output_signal(
+            monitor.device_id,
+            monitor.output_id,
+        )
     
-    # Added to support displaying net name rather than device name
-    def set_monitor_display_name(self, device_id, output_id, display_name):
-        """Store the name that should be displayed for a monitored signal."""
-        self.monitor_display_names[(device_id, output_id)] = display_name
-
-    def get_monitor_display_name(self, device_id, output_id):
-        """Return the display name for a monitored signal."""
-        signal_key = (device_id, output_id)
-
-        if signal_key in self.monitor_display_names:
-            return self.monitor_display_names[signal_key]
-
-        return self.devices.get_signal_name(device_id, output_id)
 
     def record_signals(self):
         """Record the current signal level for every monitor.
 
         This function is called at every simulation cycle.
         """
-        for device_id, output_id in self.monitors_dictionary:
-            signal_level = self.get_monitor_signal(device_id, output_id)
-            self.monitors_dictionary[(device_id,
-                                      output_id)].append(signal_level)
+        for monitor in self.monitors_dictionary.values():
+            signal_level = self.network.get_output_signal(
+                monitor.device_id,
+                monitor.output_id,
+            )
+            monitor.trace.append(signal_level)
 
     def get_signal_names(self):
         """Return two signal name lists: monitored and not monitored."""
         non_monitored_signal_list = []
-        monitored_signal_list = []
-        for device_id, output_id in self.monitors_dictionary:
-            monitor_name = self.get_monitor_display_name(device_id, output_id)
-            monitored_signal_list.append(monitor_name)
+        monitored_signal_list = list(self.monitors_dictionary.keys())
+        monitored_sources = {
+            (monitor.device_id, monitor.output_id)
+            for monitor in self.monitors_dictionary.values()
+        }
 
         for device_id in self.devices.find_devices():
             device = self.devices.get_device(device_id)
             for output_id in device.outputs:
-                if (device_id, output_id) not in self.monitors_dictionary:
+                if (device_id, output_id) not in monitored_sources:
                     signal_name = self.devices.get_signal_name(device_id,
                                                                output_id)
                     non_monitored_signal_list.append(signal_name)
@@ -167,8 +176,8 @@ class Monitors:
 
         The list of stored signal levels for each monitor is deleted.
         """
-        for device_id, output_id in self.monitors_dictionary:
-            self.monitors_dictionary[(device_id, output_id)] = []
+        for monitor in self.monitors_dictionary.values():
+            monitor.trace = []
 
     def get_margin(self):
         """Return the length of the longest monitor's name.
@@ -177,23 +186,21 @@ class Monitors:
         finding out how much space to leave after each monitor's name before
         starting to draw the signal trace.
         """
-        length_list = []  # for storing name lengths
-        for device_id, output_id in self.monitors_dictionary:
-            monitor_name = self.get_monitor_display_name(device_id, output_id)
-            name_length = len(monitor_name)
-            length_list.append(name_length)
-        if length_list:  # if the list is not empty
-            return max(length_list)
-        else:
+        if not self.monitors_dictionary:
             return None
+
+        return max(
+            len(monitor.requested_name)
+            for monitor in self.monitors_dictionary.values()
+        )
 
     def display_signals(self):
         """Display the signal trace(s) in the text console."""
         margin = self.get_margin()
-        for device_id, output_id in self.monitors_dictionary:
-            monitor_name = self.get_monitor_display_name(device_id, output_id)
+        for monitor in self.monitors_dictionary.values():
+            monitor_name = monitor.requested_name
             name_length = len(monitor_name)
-            signal_list = self.monitors_dictionary[(device_id, output_id)]
+            signal_list = monitor.trace
             print(monitor_name + (margin - name_length) * " ", end=": ")
             for signal in signal_list:
                 if signal == self.devices.HIGH:

@@ -194,8 +194,8 @@ class MyGLCanvas(wxcanvas.GLCanvas):
                 display_height += display_row["height"]
 
             max_trace_length = 0
-            for trace in self.monitors.monitors_dictionary.values():
-                trace_length = len(trace)
+            for monitor in self.monitors.monitors_dictionary.values():
+                trace_length = len(monitor.trace)
                 if trace_length > max_trace_length:
                     max_trace_length = trace_length
 
@@ -383,19 +383,18 @@ class MyGLCanvas(wxcanvas.GLCanvas):
 
         # First build a small tree from monitor names containing ->
         # e.g. A->B->Q becomes module A inside module B signal Q
-        for monitor_key, trace in self.monitors.monitors_dictionary.items():
-            device_id, output_id = monitor_key
-            monitor_name = self.monitors.get_monitor_display_name(device_id, output_id)
+        for monitor in self.monitors.monitors_dictionary.values():
+            monitor_name = monitor.requested_name
 
             if "->" not in monitor_name:
                 # Top level signals do not need a heading so draw directly as normal trace rows
                 rows.append({"kind": "trace",
                              "label": monitor_name,
-                             "trace": trace,
+                             "trace": monitor.trace,
                              "height": 1})
                 continue
 
-            add_signal_to_module_tree(module_tree, monitor_name, trace)
+            add_signal_to_module_tree(module_tree, monitor_name, monitor.trace)
 
         # now flatten the tree into drawing rows  
         # This keeps the render() method simple because it only has to loop over one list
@@ -560,7 +559,7 @@ class Gui(wx.Frame):
 
     """
 
-    def __init__(self, title, path, names, devices, network, monitors):
+    def __init__(self, title, path, names, devices, network, monitors, net_driver_dict):
         """Initialise widgets and layout."""
         # Create the main window and set its starting size
         super().__init__(parent=None, title=title, size=(1200, 750))
@@ -571,6 +570,11 @@ class Gui(wx.Frame):
         self.devices = devices
         self.network = network
         self.monitors = monitors
+
+        # From the parser - so GUI knows the driving
+        # signals of nets to make the appropriate monitors. 
+        self.net_driver_dict = net_driver_dict 
+
 
         # Number of cycles currently shown on the trace display
         self.cycles_completed = 0
@@ -892,6 +896,7 @@ class Gui(wx.Frame):
             return None
 
         device_name = name_parts[0]
+        # now can also be a net 
         device_id = self.names.query(device_name)
         if device_id is None:
             return None
@@ -902,6 +907,11 @@ class Gui(wx.Frame):
             port_id = self.names.query(port_name)
             if port_id is None:
                 return None
+
+        # Resolve the net to its driver based on net_driver_dict
+        if port_id is None and device_id in self.net_driver_dict:
+            driver_signal = self.net_driver_dict[device_id]
+            return [driver_signal.main_id, driver_signal.port_id]
 
         return [device_id, port_id]
 
@@ -922,6 +932,13 @@ class Gui(wx.Frame):
                     if signal_name.startswith("@"):
                         continue
                     signal_names.append(signal_name)
+
+        for net_id in self.net_driver_dict:
+            signal_name = self.names.get_name_string(net_id)
+            if signal_name is not None:
+                if signal_name.startswith("@"):
+                    continue
+                signal_names.append(signal_name)
 
         return signal_names
 
@@ -1088,11 +1105,7 @@ class Gui(wx.Frame):
 
     def is_signal_monitored(self, signal_name):
         """Return True if a signal name is currently monitored."""
-        signal_ids = self.get_signal_ids(signal_name)
-        if signal_ids is None:
-            return False
-
-        return tuple(signal_ids) in self.monitors.monitors_dictionary
+        return signal_name in self.monitors.monitors_dictionary
 
     def update_monitor_rows(self):
         """Refresh the active monitor list."""
@@ -1105,15 +1118,12 @@ class Gui(wx.Frame):
             empty_label.SetForegroundColour(wx.Colour(95, 99, 104))
             self.monitor_rows_sizer.Add(empty_label, 0, wx.ALL, 6)
         else:
-            for monitor_key in self.monitors.monitors_dictionary:
-                device_id, output_id = monitor_key
-                monitor_name = self.monitors.get_monitor_display_name(device_id, output_id)
-
+            for monitor_name in self.monitors.monitors_dictionary:
                 row_sizer = wx.BoxSizer(wx.HORIZONTAL)
                 label = wx.StaticText(self.monitor_rows, wx.ID_ANY, monitor_name)
                 button = wx.Button(self.monitor_rows, wx.ID_ANY, "Remove")
 
-                self.monitor_button_keys[button.GetId()] = monitor_key
+                self.monitor_button_keys[button.GetId()] = monitor_name
                 button.Bind(wx.EVT_BUTTON, self.on_remove_monitor_row_button)
                 row_sizer.Add(label, 1, wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, 4)
                 row_sizer.Add(button, 0)
@@ -1125,11 +1135,9 @@ class Gui(wx.Frame):
     def on_remove_monitor_row_button(self, event):
         """Remove a monitor from the active monitor list."""
         button_id = event.GetId()
-        monitor_key = self.monitor_button_keys[button_id]
-        device_id, output_id = monitor_key
-        monitor_name = self.monitors.get_monitor_display_name(device_id, output_id)
+        monitor_name = self.monitor_button_keys[button_id]
 
-        if self.monitors.remove_monitor(device_id, output_id):
+        if self.monitors.remove_monitor(monitor_name):
             self.show_status(f"Removed monitor for {monitor_name}.")
         else:
             self.show_status(f"Error: could not remove monitor for {monitor_name}.")
@@ -1214,7 +1222,7 @@ class Gui(wx.Frame):
 
         device_id, output_id = signal_ids
 
-        if self.monitors.remove_monitor(device_id, output_id):
+        if self.monitors.remove_monitor(signal_name):
             self.show_status(f"Removed monitor for {signal_name}.")
         else:
             self.show_status(f"Error: {signal_name} is not monitored.")
@@ -1243,7 +1251,8 @@ class Gui(wx.Frame):
         error_type = self.monitors.make_monitor(
             device_id,
             output_id,
-            self.cycles_completed,
+            requested_name=monitor_name,
+            cycles_completed=self.cycles_completed,
         )
 
         # make_monitor returns an error code, so decode it if it fails or
@@ -1257,10 +1266,7 @@ class Gui(wx.Frame):
             if hasattr(self, "update_monitor_rows"):
                 self.update_monitor_rows()
         elif error_type == self.monitors.MONITOR_PRESENT:
-            existing_name = self.monitors.get_monitor_display_name(
-                device_id,
-                output_id,
-            )
+            existing_name = self.monitors.get_monitor_display_name(monitor_name)
 
             if existing_name != monitor_name:
                 self.show_status(
