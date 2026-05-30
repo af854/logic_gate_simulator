@@ -72,7 +72,8 @@ class Scanner:
             self.NUMBER,
             self.NAME,
             self.EOF,
-        ) = range(10)
+            self.UNKNOWN
+        ) = range(11)
 
         self.punct_map = {
             ",": self.COMMA,
@@ -156,12 +157,13 @@ class Scanner:
             if group in ("WHITESPACE", "COMMENT"):
                 continue
 
-            if group == "UNKNOWN":
-                continue
 
             start_index = match.start()
             line_num = bisect.bisect_right(self.line_starts, start_index) - 1
             line_pos = start_index - self.line_starts[line_num]
+
+            if group == "UNKNOWN":
+                return Symbol(self.UNKNOWN, None, line_num, line_pos)
 
             string_val = match.group()
 
