@@ -153,14 +153,29 @@ def test_scanner_skips(new_names, create_definition_file):
 
 
 def test_scanner_unknown_characters(new_names, create_definition_file):
-    """Test that illegal characters are gracefully skipped per regex fallback."""
-    file_path = create_definition_file("@ # ! 42")
+    """Test that illegal characters are rigorously flagged as UNKNOWN types."""
+    # Using @, ?, and ! to avoid triggering the # comment regex
+    file_path = create_definition_file("@ ? ! 42")
     scanner = Scanner(file_path, new_names)
 
-    # Should silently drop @, #, ! and return the first valid token
-    sym = scanner.get_symbol()
-    assert sym.type == scanner.NUMBER
-    assert sym.id == 42
+    sym1 = scanner.get_symbol()
+    assert sym1.type == scanner.UNKNOWN
+    assert sym1.line_num == 0
+    assert sym1.line_pos == 0
+
+    sym2 = scanner.get_symbol()
+    assert sym2.type == scanner.UNKNOWN
+    assert sym2.line_num == 0
+    assert sym2.line_pos == 2
+
+    sym3 = scanner.get_symbol()
+    assert sym3.type == scanner.UNKNOWN
+    assert sym3.line_num == 0
+    assert sym3.line_pos == 4
+
+    sym4 = scanner.get_symbol()
+    assert sym4.type == scanner.NUMBER
+    assert sym4.id == 42
 
 
 def test_scanner_eof(new_names, create_definition_file):
@@ -244,3 +259,33 @@ def test_scanner_consecutive_symbols(new_names, create_definition_file):
     assert new_names.get_name_string(sym5.id) == "I1"
 
     assert scanner.get_symbol().type == scanner.SEMICOLON
+
+
+def test_scanner_unknown_integration_with_error_reporting(
+    new_names, create_definition_file, capsys
+):
+    """Test that UNKNOWN symbol coordinates map correctly to error printing."""
+    content = "CONNECT A = ?;"
+    file_path = create_definition_file(content)
+    scanner = Scanner(file_path, new_names)
+
+    # Consume the valid symbols: CONNECT, A, =
+    for _ in range(3):
+        scanner.get_symbol()
+
+    # The next symbol should be the illegal '?' character
+    sym_unknown = scanner.get_symbol()
+    assert sym_unknown.type == scanner.UNKNOWN
+    assert sym_unknown.line_num == 0
+    assert sym_unknown.line_pos == 12
+
+    # Simulate the parser passing the unknown symbol's coordinates to the error printer
+    scanner.print_error_line(sym_unknown.line_num, sym_unknown.line_pos)
+
+    captured = capsys.readouterr()
+    printed_lines = captured.out.split("\n")
+
+    assert printed_lines[0] == content
+    # The padding must perfectly match the 12 spaces preceding the '?'
+    expected_marker = (" " * 12) + "^"
+    assert printed_lines[1] == expected_marker
