@@ -88,7 +88,7 @@ class Monitors:
         [self.NO_ERROR, self.NOT_OUTPUT,
          self.MONITOR_PRESENT, self.DEVICE_ABSENT] = self.names.unique_error_codes(4)
     
-    def make_monitor(self, device_id, output_id, requested_name, cycles_completed=0):
+    def make_monitor(self, device_id, output_id, requested_name=None, cycles_completed=0):
         """Add the specified signal to the monitors dictionary.
 
         Return NO_ERROR if successful, or the corresponding error if not.
@@ -98,6 +98,11 @@ class Monitors:
             return self.DEVICE_ABSENT
         elif output_id not in monitor_device.outputs:
             return self.NOT_OUTPUT
+        if(requested_name is None):
+            requested_name = self.names.get_name_string(device_id)
+            if(output_id is not None):
+                requested_name+="."+self.names.get_name_string(output_id)
+
         if requested_name in self.monitors_dictionary:
             return self.MONITOR_PRESENT
         else:
