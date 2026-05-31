@@ -6,12 +6,27 @@
 GF2 Logic Simulator documentation
 =================================
 
-Add your content using ``reStructuredText`` syntax. See the
-`reStructuredText <https://www.sphinx-doc.org/en/master/usage/restructuredtext/index.html>`_
-documentation for details.
+welcome to gf2 run by the best team
+
+we have fire documentation
+
+and indestructible code
+
+please browse to your heart's content
 
 
 .. toctree::
    :maxdepth: 2
    :caption: Contents:
 
+   user_guide
+   syntax_spec
+   devices
+   gui
+   monitors
+   names
+   network
+   parse
+   parser_objects
+   scanner
+   userint

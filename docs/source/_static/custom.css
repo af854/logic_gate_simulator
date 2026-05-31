@@ -1,0 +1,23 @@
+html[data-theme="dark"] .rst-content dt .sig-name,
+html[data-theme="dark"] .rst-content dt .sig-prename,
+html[data-theme="dark"] .rst-content dt .descname,
+html[data-theme="dark"] .rst-content dt .descclassname {
+    color: #ffffff !important;
+}
+
+html[data-theme="dark"] .rst-content dl.function > dt,
+html[data-theme="dark"] .rst-content dl.method > dt {
+    background-color: #1e1e1e !important; 
+    border-top-color: #333333 !important; 
+    
+    color: #8a8a8a !important; 
+}
+
+html[data-theme="dark"] .rst-content dl.function > dt .sig-param,
+html[data-theme="dark"] .rst-content dl.method > dt .sig-param {
+    color: #8a8a8a !important;
+}
+
+html[data-theme="dark"] .rst-content dt.sig.sig-object.py {
+    border-left-color: #333333 !important; /* A dark grey that blends in nicely */
+}

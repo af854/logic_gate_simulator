@@ -23,6 +23,7 @@ extensions = [
     "sphinx.ext.autodoc",
     "sphinx.ext.napoleon",  # adds support for Google/NumPy style docstrings
     "sphinx.ext.viewcode",  # adds links to the highlighted source code
+    "sphinx_rtd_dark_mode",
 ]
 
 templates_path = ["_templates"]
@@ -34,3 +35,6 @@ exclude_patterns = []
 
 html_theme = "sphinx_rtd_theme"
 html_static_path = ["_static"]
+html_css_files = [
+    "custom.css",
+]
