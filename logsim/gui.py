@@ -53,14 +53,21 @@ from parse import Parser
 # - Option to export the monitor traces as a CSV file for analysis in Excel etc.
 # - Option to change the colour scheme (e.g. dark mode) of the waveform display for better accessibility
 # - File upload so that different files can be tested without restarting the program
+# - panels are collapsible if user does not want them visible, e.g. the available signals panel can be very long and is not always needed
 
 # ----- Features to add -----
 # - Slider that shows the value of all signals at a particular cycle that can be dragged back and forth to explore the history of the simulation
-# - Live tracing mode where the display updates in real time as the simulation runs, instead of only after the user clicks 'Run cycles'
-# - Make panels collapsible if user does not want them visible, e.g. the available signals panel can be very long and is not always needed
-# - Add a search box to the available signals panel to make it easier to find the signal you want to monitor
-# - Add furthr keyboard shortcuts for common actions
 # - Add a help menu with instructions on how to use the GUI and explanations of the different features, e.g. the mouse controls for panning and zooming the waveform display
+
+# ----- Features that were considered but ultimately not implemented -----
+# - Live tracing mode where the display updates in real time as the simulation runs, instead of only after the user clicks 'Run cycles'
+#     - This was not implemented because it is more complex and could cause performance issues for large simulations
+#     - if there was more time available, it could've been addd as an optional mode that can be toggled on or off by the user
+# - multiple tabs for different waveform displays, e.g. to compare the outputs of two different simulations side by side
+#     - again, extremely comlex to implement and not a core feature so was not implemented in the interest of time
+#     - also just not sure if it would be useful, you could just export both simulations as images and compare them that way - much easier to implement than a whole new tabbed interface within the GUI
+# - Add a search box to the available signals panel to make it easier to find the signal you want to monitor
+#     - This would be a nice quality of life improvement but was not implemented because the available signals panel is already quite easy to navigate without a search box
 
 
 # wxPython uses ID numbers to connect shortcuts and menu events to handlers
@@ -73,6 +80,10 @@ ID_ZOOM_IN = wx.NewIdRef()
 ID_ZOOM_OUT = wx.NewIdRef()
 ID_OPEN_FILE = wx.NewIdRef()
 ID_TOGGLE_THEME = wx.NewIdRef()
+ID_SHOW_AVAILABLE_SIGNALS = wx.NewIdRef()
+ID_SHOW_SIMULATION = wx.NewIdRef()
+ID_SHOW_SWITCHES = wx.NewIdRef()
+ID_SHOW_STATUS = wx.NewIdRef()
 
 
 THEMES = {
@@ -720,25 +731,37 @@ class Gui(wx.Frame):
         file_menu = wx.Menu()
         export_menu = wx.Menu()
         view_menu = wx.Menu()
+        window_menu = wx.Menu()
         menu_bar = wx.MenuBar()
-        file_menu.Append(ID_OPEN_FILE, "&Open...")
+
+        file_menu.Append(ID_OPEN_FILE, "&Open...\tctrl+O")
         file_menu.AppendSeparator()
-        file_menu.Append(wx.ID_ABOUT, "&About")
-        file_menu.Append(wx.ID_EXIT, "&Exit")
-        export_menu.Append(ID_EXPORT_IMAGE, "Export as PNG")
-        export_menu.Append(ID_EXPORT_CSV, "Export as CSV")
-        view_menu.Append(ID_ZOOM_IN, "Zoom in")
-        view_menu.Append(ID_ZOOM_OUT, "Zoom out")
-        view_menu.Append(ID_RESET_VIEW, "Reset view")
+        file_menu.Append(wx.ID_ABOUT, "&About\tF1")
+        file_menu.Append(wx.ID_EXIT, "&Exit\tctrl+Q")
+        export_menu.Append(ID_EXPORT_IMAGE, "Export as PNG\tctrl+shift+P")
+        export_menu.Append(ID_EXPORT_CSV, "Export as CSV\tctrl+shift+E")
+        view_menu.Append(ID_ZOOM_IN, "Zoom in\tctrl+=")
+        view_menu.Append(ID_ZOOM_OUT, "Zoom out\tctrl+-")
+        view_menu.Append(ID_RESET_VIEW, "Reset view\tctrl+0")
         view_menu.AppendSeparator()
+
         if self.theme_name == "dark":
-            theme_label = "Switch to light mode"
+            theme_label = "Switch to light mode\tctrl+shift+T"
         else:
-            theme_label = "Switch to dark mode"
+            theme_label = "Switch to dark mode\tctrl+shift+T"
+
         self.theme_menu_item = view_menu.Append(ID_TOGGLE_THEME, theme_label)
+        self.window_menu_items = {"available_signals": window_menu.Append(ID_SHOW_AVAILABLE_SIGNALS, "Show Available signals\tctrl+1"),
+                                  "simulation": window_menu.Append(ID_SHOW_SIMULATION, "Show Simulation\tctrl+2"),
+                                  "switches": window_menu.Append(ID_SHOW_SWITCHES, "Show Switches\tctrl+3"),
+                                  "status": window_menu.Append(ID_SHOW_STATUS, "Show Status\tctrl+4")}
+        
         menu_bar.Append(file_menu, "&File")
         menu_bar.Append(view_menu, "&View")
+        menu_bar.Append(window_menu, "&Window")
         menu_bar.Append(export_menu, "&Export")
+
+        self.menu_bar = menu_bar
         self.SetMenuBar(menu_bar)
         self.CreateStatusBar()
         self.set_status("Ready")
@@ -808,22 +831,44 @@ class Gui(wx.Frame):
         self.Bind(wx.EVT_MENU, self.on_zoom_out, id=ID_ZOOM_OUT)
         self.Bind(wx.EVT_MENU, self.on_open_file, id=ID_OPEN_FILE)
         self.Bind(wx.EVT_MENU, self.on_toggle_theme, id=ID_TOGGLE_THEME)
+        self.Bind(wx.EVT_MENU, self.on_show_section, id=ID_SHOW_AVAILABLE_SIGNALS)
+        self.Bind(wx.EVT_MENU, self.on_show_section, id=ID_SHOW_SIMULATION)
+        self.Bind(wx.EVT_MENU, self.on_show_section, id=ID_SHOW_SWITCHES)
+        self.Bind(wx.EVT_MENU, self.on_show_section, id=ID_SHOW_STATUS)
 
         # Keyboard shortcuts call the same handlers as the buttons
         accelerators = wx.AcceleratorTable([
             (wx.ACCEL_NORMAL, wx.WXK_SPACE, ID_RUN),  # Space: run cycles
-            (wx.ACCEL_CTRL, ord("R"), ID_RESET_VIEW),  # Ctrl+R: reset view
+            (wx.ACCEL_CTRL, ord("O"), ID_OPEN_FILE),  # Ctrl+O: open file
+            (wx.ACCEL_CTRL, ord("="), ID_ZOOM_IN),  # Ctrl+=: zoom in
+            (wx.ACCEL_CTRL, ord("-"), ID_ZOOM_OUT),  # Ctrl+-: zoom out
+            (wx.ACCEL_CTRL, ord("0"), ID_RESET_VIEW),  # Ctrl+0: reset view
+            (wx.ACCEL_CTRL | wx.ACCEL_SHIFT, ord("P"), ID_EXPORT_IMAGE),  # Ctrl+Shift+P: export PNG
+            (wx.ACCEL_CTRL | wx.ACCEL_SHIFT, ord("E"), ID_EXPORT_CSV),  # Ctrl+Shift+E: export CSV
+            (wx.ACCEL_CTRL | wx.ACCEL_SHIFT, ord("T"), ID_TOGGLE_THEME),  # Ctrl+Shift+T: light/dark mode
+            (wx.ACCEL_CTRL, ord("1"), ID_SHOW_AVAILABLE_SIGNALS),  # Ctrl+1: show available signals
+            (wx.ACCEL_CTRL, ord("2"), ID_SHOW_SIMULATION),  # Ctrl+2: show simulation
+            (wx.ACCEL_CTRL, ord("3"), ID_SHOW_SWITCHES),  # Ctrl+3: show switches
+            (wx.ACCEL_CTRL, ord("4"), ID_SHOW_STATUS),  # Ctrl+4: show status
+            (wx.ACCEL_NORMAL, wx.WXK_F1, wx.ID_ABOUT),  # F1: about
+            (wx.ACCEL_CTRL, ord("Q"), wx.ID_EXIT),  # Ctrl+Q: exit
             (wx.ACCEL_NORMAL, wx.WXK_DELETE, ID_CLEAR_STATUS)])  # Delete: clear status
         self.SetAcceleratorTable(accelerators)
 
         # Configure sizers for layout
         main_sizer = wx.BoxSizer(wx.HORIZONTAL)
         side_sizer = wx.BoxSizer(wx.VERTICAL)
-        self.static_boxes = []
+        self.section_panels = {}
+        self.section_titles = {}
+        self.section_close_buttons = {}
 
-        simulation_box = wx.StaticBox(self, wx.ID_ANY, "Simulation")
-        self.static_boxes.append(simulation_box)
-        simulation_sizer = wx.StaticBoxSizer(simulation_box, wx.VERTICAL)
+        simulation_panel, simulation_sizer = self.create_section_panel("Simulation", "simulation")
+        self.text.Reparent(simulation_panel)
+        self.spin.Reparent(simulation_panel)
+        self.cycles_completed_text.Reparent(simulation_panel)
+        self.run_cycles_button.Reparent(simulation_panel)
+        self.reset_button.Reparent(simulation_panel)
+        self.clear_traces_button.Reparent(simulation_panel)
         simulation_sizer.Add(self.text, 0, wx.LEFT | wx.RIGHT | wx.TOP, 6)
         simulation_sizer.Add(self.spin, 0, wx.EXPAND | wx.ALL, 6)
         simulation_sizer.Add(self.cycles_completed_text, 0, wx.LEFT | wx.RIGHT | wx.BOTTOM, 6)
@@ -831,27 +876,25 @@ class Gui(wx.Frame):
         simulation_sizer.Add(self.reset_button, 0, wx.EXPAND | wx.ALL, 6)
         simulation_sizer.Add(self.clear_traces_button, 0, wx.EXPAND | wx.ALL, 6)
 
-        switch_box = wx.StaticBox(self, wx.ID_ANY, "Switches")
-        self.static_boxes.append(switch_box)
-        switch_sizer = wx.StaticBoxSizer(switch_box, wx.VERTICAL)
+        switch_panel, switch_sizer = self.create_section_panel("Switches", "switches")
+        self.switch_rows.Reparent(switch_panel)
         switch_sizer.Add(self.switch_rows, 1, wx.EXPAND | wx.ALL, 6)
 
-        signal_box = wx.StaticBox(self, wx.ID_ANY, "Available signals")
-        self.static_boxes.append(signal_box)
-        signal_sizer = wx.StaticBoxSizer(signal_box, wx.VERTICAL)
+        signal_panel, signal_sizer = self.create_section_panel("Available signals", "available_signals")
+        self.module_signal_rows.Reparent(signal_panel)
         signal_sizer.Add(self.module_signal_rows, 1, wx.EXPAND | wx.ALL, 6)
 
-        status_box = wx.StaticBox(self, wx.ID_ANY, "Status")
-        self.static_boxes.append(status_box)
-        status_sizer = wx.StaticBoxSizer(status_box, wx.VERTICAL)
+        status_panel, status_sizer = self.create_section_panel("Status", "status")
+        self.status_box.Reparent(status_panel)
+        self.clear_status_button.Reparent(status_panel)
         status_sizer.Add(self.status_box, 1, wx.EXPAND | wx.ALL, 6)
         status_sizer.Add(self.clear_status_button, 0, wx.EXPAND | wx.ALL, 6)
 
-        side_sizer.Add(simulation_sizer, 0, wx.EXPAND | wx.BOTTOM, 8)
-        side_sizer.Add(switch_sizer, 1, wx.EXPAND | wx.BOTTOM, 8)
-        side_sizer.Add(status_sizer, 0, wx.EXPAND)
+        side_sizer.Add(simulation_panel, 0, wx.EXPAND | wx.BOTTOM, 8)
+        side_sizer.Add(switch_panel, 1, wx.EXPAND | wx.BOTTOM, 8)
+        side_sizer.Add(status_panel, 0, wx.EXPAND)
 
-        main_sizer.Add(signal_sizer, 0, wx.EXPAND | wx.ALL, 8)
+        main_sizer.Add(signal_panel, 0, wx.EXPAND | wx.ALL, 8)
         main_sizer.Add(self.canvas, 4, wx.EXPAND | wx.ALL, 5)
         main_sizer.Add(side_sizer, 0, wx.EXPAND | wx.ALL, 8)
 
@@ -859,6 +902,7 @@ class Gui(wx.Frame):
         self.update_switch_rows()
         self.update_module_signal_rows()
         self.apply_theme()
+        self.update_section_window_menu()
 
         # Prevent the user from shrinking the window so much that the controls or canvas become unusable
         main_sizer.SetSizeHints(self)
@@ -1007,6 +1051,31 @@ class Gui(wx.Frame):
         self.apply_theme()
         self.show_status(f"Switched to {self.theme_name} mode.")
 
+    def on_close_section(self, event):
+        """Hide one side panel section."""
+        section_name = event.GetEventObject().GetName()
+        self.section_panels[section_name].Hide()
+        self.update_section_window_menu()
+        self.Layout()
+
+    def on_show_section(self, event):
+        """Show one hidden side panel section from the Window menu."""
+        menu_id = event.GetId()
+        if menu_id == ID_SHOW_AVAILABLE_SIGNALS:
+            section_name = "available_signals"
+        elif menu_id == ID_SHOW_SIMULATION:
+            section_name = "simulation"
+        elif menu_id == ID_SHOW_SWITCHES:
+            section_name = "switches"
+        else:
+            section_name = "status"
+
+        self.section_panels[section_name].Show()
+        self.section_close_buttons[section_name].SetLabel("X")
+        self.section_close_buttons[section_name].Refresh()
+        self.update_section_window_menu()
+        self.Layout()
+
     def on_open_file(self, event):
         """Load a new circuit definition file into the current GUI."""
         with wx.FileDialog(self, "Open circuit definition", wildcard="Circuit files (*.txt)|*.txt|All files (*.*)|*.*", style=wx.FD_OPEN | wx.FD_FILE_MUST_EXIST) as file_dialog:
@@ -1054,6 +1123,34 @@ class Gui(wx.Frame):
 # GUI HELPER FUNCTIONS
 ###############################################################################
 
+    def create_section_panel(self, title, section_name):
+        """Create one side panel section with a close button."""
+        panel = wx.Panel(self, wx.ID_ANY, style=wx.BORDER_SIMPLE)
+        panel_sizer = wx.BoxSizer(wx.VERTICAL)
+        header_sizer = wx.BoxSizer(wx.HORIZONTAL)
+        body_sizer = wx.BoxSizer(wx.VERTICAL)
+
+        title_label = wx.StaticText(panel, wx.ID_ANY, title)
+        close_button = wx.Button(panel, wx.ID_ANY, "X", size=(24, 24))
+        close_button.SetName(section_name)
+        close_button.Bind(wx.EVT_BUTTON, self.on_close_section)
+
+        header_sizer.Add(title_label, 1, wx.ALIGN_CENTER_VERTICAL | wx.LEFT, 6)
+        header_sizer.Add(close_button, 0, wx.RIGHT | wx.TOP, 4)
+        panel_sizer.Add(header_sizer, 0, wx.EXPAND)
+        panel_sizer.Add(body_sizer, 1, wx.EXPAND)
+        panel.SetSizer(panel_sizer)
+
+        self.section_panels[section_name] = panel
+        self.section_titles[section_name] = title_label
+        self.section_close_buttons[section_name] = close_button
+        return panel, body_sizer
+
+    def update_section_window_menu(self):
+        """Enable Window menu items only for hidden sections."""
+        for section_name, menu_item in self.window_menu_items.items():
+            menu_item.Enable(not self.section_panels[section_name].IsShown())
+
     def get_system_theme_name(self):
         """Return the OS light/dark appearance when wx exposes it."""
         if hasattr(wx.SystemSettings, "GetAppearance"):
@@ -1079,13 +1176,15 @@ class Gui(wx.Frame):
         self.canvas.init = False
 
         if self.theme_name == "dark":
-            self.theme_menu_item.SetItemLabel("Switch to light mode")
+            self.theme_menu_item.SetItemLabel("Switch to light mode\tctrl+shift+T")
         else:
-            self.theme_menu_item.SetItemLabel("Switch to dark mode")
+            self.theme_menu_item.SetItemLabel("Switch to dark mode\tctrl+shift+T")
 
         self.SetBackgroundColour(self.theme["frame_bg"])
         self.status_box.SetBackgroundColour(self.theme["status_bg"])
         self.status_box.SetForegroundColour(self.theme["status_text"])
+        self.menu_bar.SetBackgroundColour(self.theme["frame_bg"])
+        self.menu_bar.SetForegroundColour(self.theme["text"])
 
         themed_controls = [self.text,
                            self.spin,
@@ -1101,9 +1200,13 @@ class Gui(wx.Frame):
         for control in themed_controls:
             self.apply_theme_to_control(control)
 
-        for static_box in self.static_boxes:
-            static_box.SetBackgroundColour(self.theme["frame_bg"])
-            static_box.SetForegroundColour(self.theme["text"])
+        for section_name, panel in self.section_panels.items():
+            panel.SetBackgroundColour(self.theme["frame_bg"])
+            self.section_titles[section_name].SetForegroundColour(self.theme["text"])
+            self.section_close_buttons[section_name].SetLabel("X")
+            self.section_close_buttons[section_name].SetBackgroundColour(self.theme["button_bg"])
+            self.section_close_buttons[section_name].SetForegroundColour(self.theme["text"])
+            self.section_close_buttons[section_name].Refresh()
 
         self.update_switch_rows()
         self.update_module_signal_rows()
