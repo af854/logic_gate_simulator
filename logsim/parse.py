@@ -148,7 +148,7 @@ class Parser:
 
         # Store the current symbol.
         self.symbol = None
-        
+
         self.net_ids = set() # Set that stores id of all nets. 
         self.net_driver_dict = {} # Dictionary mapping net id to its driving signal.
 
@@ -157,6 +157,8 @@ class Parser:
         # into this list. Then once all connection statements are read, then we 
         # go through the list again, resolving any net references to the
         # actual aliased device output port. 
+        # This extra pass is because we allow nets to be used as a source
+        # before they are driven in the code.
         self.pending_connections = [] 
 
         # A dictionary that stores module definitions. 
@@ -173,6 +175,15 @@ class Parser:
 
         # Maps (instance_id, port_id) to "input" or "output"
         self.module_instance_port_directions = {}
+
+        # Keep track of device declaration symbols to point to them easily
+        # for device input not driven error msg
+        self.device_declaration_symbols = {}
+        # Maps internal primitive device id to the module type it came from.
+        # e.g. id("H1->X1") -> "HALFADDER". Used to display appropriate error msg
+        # for device not driven within module
+        # This allows using existing devices.py logic to check for undriven inputs
+        self.device_module_names = {}
 
         # Currently unused - will be used when error recovery is implemented
         self.error_count = 0
@@ -234,8 +245,8 @@ class Parser:
             self.scanner.print_error_line(symbol.line_num, symbol.line_pos)
             if(self.error_count == 1):
                 print("Attempting to skip the affected statement(s) and continue parsing")
-                print("to detect further syntax errors. Network construction and related")
-                print("semantic checks will not be attempted. ")
+                print("to detect further syntax errors...")
+                print("Network construction and related semantic checks will no longer be attempted. ")
         if(synchronize):
             self.synchronize(stopping_types)
 
@@ -278,9 +289,9 @@ class Parser:
         if error_type == self.network.NO_ERROR:
             return None
         if error_type == self.network.INPUT_TO_INPUT:
-            return "Cannot connect an input to another input"
+            return "Input cannot be on the RHS of expression"
         if error_type == self.network.OUTPUT_TO_OUTPUT:
-            return "Cannot connect an output to another output"
+            return "Output cannot be on LHS of connection"
         if error_type == self.network.INPUT_CONNECTED:
             return "Input is already connected"
         if error_type == self.network.FIRST_PORT_ABSENT or error_type == self.network.SECOND_PORT_ABSENT:
@@ -342,7 +353,7 @@ class Parser:
 # EBNF PARSING: BASIC EBNF RULES
 #############################################################################################
 
-    def parse_name(self, consume_reserved_keyword=False):
+    def parse_name(self, consume_reserved_keyword=False, expected_name=None):
         """Parse a name (i.e. check if the current symbol is a scanner.NAME) 
         and return the symbol object if successful, or None otherwise.
 
@@ -352,6 +363,8 @@ class Parser:
         in a statement like a name_list. Avoid setting this option in situations
         outside of a name list statement, e.g. when we want to parse
         the module name, where it may cause structural issues to be missed.
+        
+        Optional expected_name to provide better error message context.
 
         """
         # We return the symbol object, not just the id, so we maintain information about the
@@ -364,26 +377,36 @@ class Parser:
         if self.symbol.type == self.scanner.KEYWORD:
             self.error("Name cannot be a reserved keyword: " +
                        self.symbol_string())
-            self.advance() # consume the reserved keyword...
+            if(consume_reserved_keyword):
+                self.advance() # consume the reserved keyword...
         else:
-            self.error("Expected a name.", synchronize=True)
+            if expected_name is None:
+                expected_name = "a name"
+            errormsg = "Expected "+expected_name
+            if self.symbol.type == self.scanner.NUMBER:
+                errormsg += ", but names cannot start with a number."
+            else:
+                errormsg += "."
+            self.error(errormsg, synchronize=True)
         return None
 
-    def parse_name_list(self):
+    def parse_name_list(self, expected_name=None):
         """Parse name_list based on EBNF specification.
         name_list = name, { ',', name }.
+        Optional expected_name field for the type of name expected in the list,
+        for better error message context in parse_name. 
         Return list of symbol objects if successful."""
 
         name_list = []
 
-        name_symbol = self.parse_name(consume_reserved_keyword=True)
+        name_symbol = self.parse_name(consume_reserved_keyword=True, expected_name=expected_name)
         if name_symbol is not None:
             name_list.append(name_symbol)
 
         while self.symbol.type == self.scanner.COMMA:
             self.advance()
 
-            name_symbol = self.parse_name()
+            name_symbol = self.parse_name(consume_reserved_keyword=True, expected_name=expected_name)
             if name_symbol is None:
                 continue
             name_list.append(name_symbol)
@@ -410,14 +433,14 @@ class Parser:
             self.advance()
             return Signal(main_symbol=literal_symbol, port_symbol=None, is_literal=True, literal_value=value)
 
-        name_symbol = self.parse_name()
+        name_symbol = self.parse_name(expected_name="signal name")
         if name_symbol is None:
             return None
 
         if self.symbol.type == self.scanner.DOT:
             self.advance()
 
-            port_symbol = self.parse_name()
+            port_symbol = self.parse_name(expected_name="port name")
             if port_symbol is None:
                 return None
 
@@ -554,8 +577,12 @@ class Parser:
         if device_kind_result is None:
             return None
 
-        device_names = self.parse_name_list()
+        device_names = self.parse_name_list(expected_name="device name")
         if device_names is None:
+            if self.symbol.type == self.scanner.SEMICOLON:
+                self.advance()
+            else:
+                self.synchronize()
             return None
 
         if self.symbol.type != self.scanner.SEMICOLON:
@@ -586,13 +613,16 @@ class Parser:
           name_list, ';'."""
         
         # 1. EBNF based syntax and collect the names of the nets 
-        net_symbols = self.parse_name_list()
+        net_symbols = self.parse_name_list(expected_name="net name")
 
         if net_symbols is None:
             return False
 
         if self.symbol.type != self.scanner.SEMICOLON:
-            self.error("Expected semicolon after net declaration", synchronize=True)
+            errormsg = "Expected semicolon after net declaration or comma to separate a list of nets."
+            if(self.symbol.type == self.scanner.EQUALS):
+                errormsg += "\n       Nets can only be connected using '=' in the CONNECT section."
+            self.error(errormsg, synchronize=True)
             return False
 
         self.advance()
@@ -721,7 +751,7 @@ class Parser:
     # Input and output sections ################################################
 
     def parse_module_ports_list(self):
-        ports_list = self.parse_name_list()
+        ports_list = self.parse_name_list(expected_name="module port name")
         if ports_list is None:
             return None
 
@@ -818,7 +848,7 @@ class Parser:
     # NETS section within module ##################################################
     
     def parse_module_net_declaration(self, module_definition):
-        net_symbols = self.parse_name_list()
+        net_symbols = self.parse_name_list("module net name")
 
         if net_symbols is None:
             return False
@@ -945,8 +975,8 @@ class Parser:
             self.error("Net cannot have a port", output_signal.port_symbol)
             return False
         if self.module_port_used_with_port(output_signal, module_definition):
-            self.error("Module output cannot have a port", output_signal.port_symbol)
-            return False
+            errormsg = "Module input/output port should not have a pin like '."+self.names.get_name_string(input_signal.port_symbol.id)+"'"
+            self.error(errormsg, input_signal.port_symbol) 
         if self.is_module_output_port(output_signal, module_definition):
             self.error("Module output port cannot be used as a source inside the module definition", output_signal.main_symbol)
             return False
@@ -960,6 +990,8 @@ class Parser:
             self.error("Signal name has not been declared in this module", output_signal.main_symbol)
             return False
 
+        # n.b. here "input signal" can refer to the output port of the module definition
+        # since internally (within the module) we drive the output port. 
         for input_signal in input_signal_list:
             if not self.can_build_network():
                 continue
@@ -971,7 +1003,8 @@ class Parser:
                 continue
             
             if self.module_port_used_with_port(input_signal, module_definition):
-                self.error("Module input cannot have a port", input_signal.port_symbol)
+                errormsg = "Module input/output port should not have a pin like '."+self.names.get_name_string(input_signal.port_symbol.id)+"'"
+                self.error(errormsg, input_signal.port_symbol) 
                 continue
             
             if input_signal.is_literal:
@@ -1076,7 +1109,7 @@ class Parser:
         
         self.advance()  # consume the MODULE symbol
 
-        module_name_symbol = self.parse_name() 
+        module_name_symbol = self.parse_name(expected_name="module name after 'MODULE'") 
         if module_name_symbol is None:
             return False
         
@@ -1260,7 +1293,7 @@ class Parser:
                                                     # to use instance_id not instance_symbol.id
                                                     # since otherwise FA1.H1 and FA2.H1 conflict
                                                     # because we're only checking H1
-            self.error("Module instance has already been defined", instance_symbol)
+            self.error("Module instance with this name already exists", instance_symbol)
             return False
 
         if self.devices.get_device(instance_id) is not None:
@@ -1348,6 +1381,9 @@ class Parser:
                 if error_message is not None:
                     self.error(error_message, module_device.symbol)
                     continue
+
+                self.device_declaration_symbols[internal_device_id] = module_device.symbol
+                self.device_module_names[internal_device_id] = module_name
             else:
                 self.error("Internal error: unknown module device kind", module_device.symbol)
                 return False
@@ -1498,6 +1534,8 @@ class Parser:
                         # e.g. DEVICE_PRESENT: duplicate device
                         self.error(error_message, device_name)
                     continue
+
+                self.device_declaration_symbols[device_name.id] = device_name
                 
         elif(module_or_primitive) == "module":
             for device_name in device_name_list:
@@ -1609,7 +1647,7 @@ class Parser:
                 break
 
             if (not self.is_net(input_signal) and self.devices.get_device(input_signal.main_id) is None):
-                self.error("Signal name does not exist in this network", input_signal.main_symbol)
+                self.error("Net/device name does not exist", input_signal.main_symbol)
                 break
 
             if self.is_net(input_signal):
@@ -1627,18 +1665,68 @@ class Parser:
 
         return True
     
-    def resolve_and_create_connections (self):
-        """Resolve all net references in pending_connections, 
-        then create all the connections in the network. Return True if successful, False otherwise"""
+    def check_all_device_inputs_driven(self):
+        """Check that every input port of every real device has a source.
+        Display an error message if some device has an undriven input."""
 
         if not self.can_build_network():
-            return True
+            return
+        # Prevent duplicate reporting of undriven primitive device inputs
+        # inside a multiple-times-instantiated module
+
+        # N.B. one might suggest that it is better to do this when parsing the 
+        # moduledefinition and not after instantiating it, to avoid this,
+        # but in that case we would have to basically rewrite existing checks
+        # inside network class about, e.g. what are the names of all the ports
+        # of the devices. 
+
+        reported_module_errors = set()
+
+        for device in self.devices.devices_list:
+            device_id = device.device_id
+            device_name = self.names.get_name_string(device_id)
+            for input_id, source in device.inputs.items():
+                if source is None:
+                    input_name = self.names.get_name_string(input_id)
+                    symbol = self.device_declaration_symbols.get(device_id, self.symbol)
+
+                    # If it's inside a module
+                    if device_id in self.device_module_names:
+                        module_name = self.device_module_names[device_id]
+                        # device_name is something like HALFADDER1->X1
+                        local_device_name = device_name.split("->")[-1] 
+
+                        error_details = (module_name, local_device_name, input_id)
+                        if error_details in reported_module_errors:
+                            # We've already issued this same error
+                            # (probably for a different instance of this module)
+                            continue
+                        reported_module_errors.add(error_details)
+                        
+                        # This assumes that the error is internal to the module, because
+                        # when called in resolve_and_create_connections, there had already been a 
+                        # check that all module instance inputs are driven
+                        self.error("Device input is not driven in module " + module_name + ": "
+                            + local_device_name + "." + input_name, symbol)
+
+                    # If it's just a device in the main circuit
+                    else:
+                        self.error("Device input is not driven: "+ device_name + "." + input_name, symbol)
+        return 
+    
+    def resolve_and_create_connections (self):
+        """Resolve all net references in pending_connections, 
+        create all the connections in the network, and run semantic checks.
+        Only runs if can_build_network i.e. no errors so far."""
+
+        if not self.can_build_network():
+            return
         
         if not self.check_module_instance_inputs_driven():
-            return True
+            return
 
         if not self.flatten_net_driver_dict():
-            return True
+            return
         
         # TODO net unused / not connected to anything checks
         # may want to keep track of the net instantiation symbols for this
@@ -1701,16 +1789,19 @@ class Parser:
                         best_error_symbol = output_signal.port_symbol
                 self.error(error_message, best_error_symbol)
                 break
-        return True
+        
+        self.check_all_device_inputs_driven() # generate an error if not 
+        
+        return
 
     def parse_connections(self):
         """Parse connections based on EBNF specification:
          connections = { connect }.
-         return True if successful."""
+         return True if syntactically successful, False otherwise"""
         while True:
             if self.is_keyword_name("MONITOR"):
                 if self.can_build_network():
-                    return self.resolve_and_create_connections()
+                    self.resolve_and_create_connections()
                 return True
 
             if self.symbol.type == self.scanner.EOF or self.is_section_keyword():
@@ -1757,7 +1848,16 @@ class Parser:
 
         for monitor_signal in all_monitors_list:
             if not self.can_build_network():
-                continue
+                break
+
+            if(monitor_signal.is_literal):
+                self.error("Cannot monitor a literal 0 or 1", monitor_signal.main_symbol)
+                break
+            
+            # Store the actual signal requested in the monitors section
+            # (so after resolving it we still can point appropriately in
+            # error messages)
+            requested_signal = monitor_signal
 
             # The display name for the monitor should be the actual name of the net
             # specified, if the user wants to monitor a net. Thus we store
@@ -1771,13 +1871,13 @@ class Parser:
             if monitor_signal.main_id in self.module_instance_ids:
                 if monitor_signal.port_id is None:
                     self.error("Must specify an output port when monitoring a module instance", monitor_signal.main_symbol)
-                    continue
+                    break
                 if not self.is_module_instance_port(monitor_signal):
                     self.error("Port does not exist on module instance", monitor_signal.port_symbol)
-                    continue
+                    break
                 if self.module_instance_port_directions[(monitor_signal.main_id, monitor_signal.port_id)] == "input":
                     self.error("Cannot monitor a module instance's input port.", monitor_signal.port_symbol)
-                    continue
+                    break
 
                 monitor_signal = self.module_instance_ports[(monitor_signal.main_id, monitor_signal.port_id)]       
 
@@ -1787,7 +1887,7 @@ class Parser:
 
                 if net_id not in self.net_driver_dict:
                     self.error("Net has no driver", monitor_signal.main_symbol)
-                    continue
+                    break
 
                 monitor_signal = self.net_driver_dict[net_id]
 
@@ -1803,21 +1903,21 @@ class Parser:
                 device = self.devices.get_device(device_id)
                 if device is None:
                     error_message = "Specified name does not match a device or net"
-                    error_symbol = monitor_signal.main_symbol
+                    error_symbol = requested_signal.main_symbol
                 elif port_id is not None and port_id not in device.outputs:
                     error_message = "Port does not exist or is not an output port"
-                    error_symbol = monitor_signal.port_symbol
+                    error_symbol = requested_signal.port_symbol
                 elif port_id is None and len(device.outputs) > 1:
                     error_message = "Device has multiple output ports - specify which one to monitor"
-                    error_symbol = monitor_signal.main_symbol
+                    error_symbol = requested_signal.main_symbol
 
-                elif monitor_signal.port_symbol is None:
-                    error_symbol = monitor_signal.main_symbol
+                elif requested_signal.port_symbol is None:
+                    error_symbol = requested_signal.main_symbol
                 else:
-                    error_symbol = monitor_signal.port_symbol
+                    error_symbol = requested_signal.port_symbol
 
                 self.error(error_message, error_symbol)
-                continue
+                break
             
         return True 
 
@@ -1893,6 +1993,8 @@ class Parser:
                 self.error("Expected end of file - MONITOR section should be the final section", synchronize=True)
                 self.fatal_error()
                 return False
+            
+
 
             if self.error_count == 0:
                 print("---------------------------------------------------------------")
