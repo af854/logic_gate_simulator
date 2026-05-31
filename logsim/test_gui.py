@@ -25,7 +25,7 @@ class DummyGui:
     get_switch_names = Gui.get_switch_names
     get_signal_ids = Gui.get_signal_ids
     get_output_signal_names = Gui.get_output_signal_names
-    add_monitor = Gui.add_monitor
+    add_monitor_by_name = Gui.add_monitor_by_name
     monitor_error_message = Gui.monitor_error_message
 
     def show_status(self, message):
@@ -190,9 +190,8 @@ def test_add_monitor(new_gui):
     The new monitor should be padded with BLANK values for the cycles that happened before it was added so all monitor traces stay the same length
     """
     new_gui.run_cycles(2)
-    new_gui.monitor_box = DummyMonitorBox("Sw1")
 
-    new_gui.add_monitor()
+    new_gui.add_monitor_by_name("Sw1")
 
     [SW1_ID] = new_gui.names.lookup(["Sw1"])
     assert new_gui.monitors.monitors_dictionary[(SW1_ID, None)] == [new_gui.devices.BLANK, new_gui.devices.BLANK]
@@ -206,9 +205,7 @@ def test_add_same_monitor_twice(new_gui):
     Or1 is already monitored in the fixture so trying to add it again should not change the monitor list
     The GUI should explain the problem
     """
-    new_gui.monitor_box = DummyMonitorBox("Or1")
-
-    new_gui.add_monitor()
+    new_gui.add_monitor_by_name("Or1")
 
     assert new_gui.status_messages == ["Error: could not add monitor for Or1. signal is already monitored."]
     assert new_gui.canvas.times_rendered == 1
