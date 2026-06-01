@@ -9,6 +9,7 @@ MyGLCanvas - handles all canvas drawing operations.
 Gui - configures the main window and all the widgets.
 """
 import wx
+import wx.lib.buttons as wxbuttons
 import wx.glcanvas as wxcanvas
 from OpenGL import GL, GLUT
 import csv
@@ -468,6 +469,7 @@ class MyGLCanvas(wxcanvas.GLCanvas):
     def save_image(self, file_path):
         """Save the current waveform display as a PNG image."""
         old_size = self.GetSize()
+        old_min_size = self.GetMinSize()
         export_size = self.get_export_image_size()
         if export_size.width <= 0 or export_size.height <= 0:
             return False
@@ -479,8 +481,17 @@ class MyGLCanvas(wxcanvas.GLCanvas):
         try:
             # Make the canvas temporarily large enough for all the trace data
             # the finally block restores the screen view afterwards
+            self.SetMinSize(export_size)
             self.SetSize(export_size)
+
+            parent = self.GetParent()
+            if parent is not None:
+                parent.Layout()
+                
+            self.Update()
+            wx.YieldIfNeeded()
             capture_size = self.GetClientSize()
+
             self.pan_x = 0
             self.pan_y = 0
             self.zoom = 1
@@ -497,7 +508,13 @@ class MyGLCanvas(wxcanvas.GLCanvas):
             return image.SaveFile(file_path, wx.BITMAP_TYPE_PNG)
         
         finally:
+            self.SetMinSize(old_min_size)
             self.SetSize(old_size)
+
+            parent = self.GetParent()
+            if parent is not None:
+                parent.Layout()
+
             self.pan_x = old_pan_x
             self.pan_y = old_pan_y
             self.zoom = old_zoom
@@ -1131,7 +1148,8 @@ class Gui(wx.Frame):
         body_sizer = wx.BoxSizer(wx.VERTICAL)
 
         title_label = wx.StaticText(panel, wx.ID_ANY, title)
-        close_button = wx.Button(panel, wx.ID_ANY, "X", size=(24, 24))
+        close_button = wxbuttons.GenButton(panel, wx.ID_ANY, "X", size=(30, 26))
+        close_button.SetMinSize((30, 26))
         close_button.SetName(section_name)
         close_button.Bind(wx.EVT_BUTTON, self.on_close_section)
 
@@ -1144,6 +1162,7 @@ class Gui(wx.Frame):
         self.section_panels[section_name] = panel
         self.section_titles[section_name] = title_label
         self.section_close_buttons[section_name] = close_button
+        self.apply_close_button_theme(close_button)
         return panel, body_sizer
 
     def update_section_window_menu(self):
@@ -1181,8 +1200,7 @@ class Gui(wx.Frame):
             self.theme_menu_item.SetItemLabel("Switch to dark mode\tctrl+shift+T")
 
         self.SetBackgroundColour(self.theme["frame_bg"])
-        self.status_box.SetBackgroundColour(self.theme["status_bg"])
-        self.status_box.SetForegroundColour(self.theme["status_text"])
+        self.apply_theme_to_text_box(self.status_box)
         self.menu_bar.SetBackgroundColour(self.theme["frame_bg"])
         self.menu_bar.SetForegroundColour(self.theme["text"])
 
@@ -1203,10 +1221,7 @@ class Gui(wx.Frame):
         for section_name, panel in self.section_panels.items():
             panel.SetBackgroundColour(self.theme["frame_bg"])
             self.section_titles[section_name].SetForegroundColour(self.theme["text"])
-            self.section_close_buttons[section_name].SetLabel("X")
-            self.section_close_buttons[section_name].SetBackgroundColour(self.theme["button_bg"])
-            self.section_close_buttons[section_name].SetForegroundColour(self.theme["text"])
-            self.section_close_buttons[section_name].Refresh()
+            self.apply_close_button_theme(self.section_close_buttons[section_name])
 
         self.update_switch_rows()
         self.update_module_signal_rows()
@@ -1221,8 +1236,7 @@ class Gui(wx.Frame):
             control.SetBackgroundColour(self.theme["button_bg"])
             control.SetForegroundColour(self.theme["text"])
         elif isinstance(control, wx.TextCtrl):
-            control.SetBackgroundColour(self.theme["status_bg"])
-            control.SetForegroundColour(self.theme["status_text"])
+            self.apply_theme_to_text_box(control)
         elif isinstance(control, wx.ScrolledWindow):
             control.SetBackgroundColour(self.theme["panel_bg"])
             control.SetForegroundColour(self.theme["text"])
@@ -1232,22 +1246,38 @@ class Gui(wx.Frame):
 
         control.Refresh()
 
+    def apply_theme_to_text_box(self, text_box):
+        """Apply theme colours to a text box without line backgrounds."""
+        text_box.SetBackgroundColour(self.theme["status_bg"])
+        text_box.SetForegroundColour(self.theme["status_text"])
+        text_style = wx.TextAttr(self.theme["status_text"])
+        text_box.SetDefaultStyle(text_style)
+
+        last_position = text_box.GetLastPosition()
+        if last_position > 0:
+            text_box.SetStyle(0, last_position, text_style)
+
+        text_box.Refresh()
+        text_box.Update()
+
+    def apply_close_button_theme(self, button):
+        """Apply colours to a small close button"""
+        button.SetLabel("X")
+        button.SetBackgroundColour(self.theme["button_bg"])
+        button.SetForegroundColour(self.theme["text"])
+
+        if hasattr(button, "SetBezelWidth"):
+            button.SetBezelWidth(1)
+
+        button.Refresh()
+        button.Update()
+
     def set_collapsible_pane_colours(self, collapsible_pane):
         """Set colours for a native collapsible pane."""
         collapsible_pane.SetBackgroundColour(self.theme["panel_bg"])
-
-        # wx draws the collapsible header itself
-        # On Windows OS at least, the header seems to stay light even in dark mode so here the text is made dark as its is easier to read
-        # Need to test on more platforms to see if this is a general issue with wx or just a quirk of Windows
-
-        if self.theme_name == "dark":
-            header_text_colour = wx.Colour(0, 0, 0)
-        else:
-            header_text_colour = self.theme["text"]
-
-        collapsible_pane.SetForegroundColour(header_text_colour)
+        collapsible_pane.SetForegroundColour(self.theme["text"])
         for child in collapsible_pane.GetChildren():
-            child.SetForegroundColour(header_text_colour)
+            child.SetForegroundColour(self.theme["text"])
             child.Refresh()
 
         collapsible_pane.Refresh()
@@ -1511,7 +1541,7 @@ class Gui(wx.Frame):
             self.module_signal_rows_sizer.Add(empty_label, 0, wx.ALL, 6)
         else:
             for signal_name in sorted(top_level_signal_names):
-                self.add_available_signal_row(self.module_signal_rows, self.module_signal_rows_sizer, signal_name, signal_name)
+                self.add_available_signal_row(self.module_signal_rows, self.module_signal_rows_sizer, signal_name, signal_name, indent=0)
 
             self.add_module_signal_group_rows(self.module_signal_rows, self.module_signal_rows_sizer, module_signal_groups,())
 
@@ -1522,7 +1552,7 @@ class Gui(wx.Frame):
     def add_module_signal_group_rows(self, parent, parent_sizer, signal_group, parent_path):
         """Add nested module panes and signal rows to a sizer."""
         for signal_name, full_signal_name in sorted(signal_group.get("signals_at_this_level", [])):
-            self.add_available_signal_row(parent, parent_sizer, signal_name, full_signal_name)
+            self.add_available_signal_row(parent, parent_sizer, signal_name, full_signal_name, indent=18)
 
         for module_name in sorted(signal_group):
             if module_name == "signals_at_this_level":
@@ -1554,7 +1584,7 @@ class Gui(wx.Frame):
             else:
                 self.module_signal_expanded_paths.discard(module_path)
 
-    def add_available_signal_row(self, parent, parent_sizer, label_text, signal_name):
+    def add_available_signal_row(self, parent, parent_sizer, label_text, signal_name, indent=0):
         """Add one available signal row with a monitor action."""
         row_sizer = wx.BoxSizer(wx.HORIZONTAL)
         label = wx.StaticText(parent, wx.ID_ANY, label_text)
@@ -1567,6 +1597,8 @@ class Gui(wx.Frame):
         self.module_signal_action_buttons[signal_name] = action_button
         self.update_available_signal_button(action_button, signal_name)
 
+        if indent > 0:
+            row_sizer.AddSpacer(indent)
         row_sizer.Add(label, 1, wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, 4)
         row_sizer.Add(action_button, 0)
         parent_sizer.Add(row_sizer, 0, wx.EXPAND | wx.ALL, 4)
