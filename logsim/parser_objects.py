@@ -1,15 +1,31 @@
-"""Small data objects used by parse.py.
+"""Define small data objects used by parse.py.
 
-Helps keep data in the parser structured. 
+These classes help keep data in the parser structured.
 """
 
 
 class Signal:
-    """Object to store a signal for use in the parser. Has fields for the device symbol and the port symbol.
-    For example for ANDGATE1.I1, the main_symbol is the object for ANDGATE1 and the port_symbol
-    is the object for I1."""
+    """Store a parsed signal, module signal, net, or literal.
+
+    A Signal normally represents something like ANDGATE1.I1, where
+    main_symbol stores the symbol for ANDGATE1 and port_symbol stores the
+    symbol for I1. It can also represent a net, a module port, or a literal.
+    """
 
     def __init__(self, main_symbol=None, port_symbol=None, is_literal=False, literal_value = None, main_id = None, port_id = None):
+        """Initialise a Signal object.
+
+        Optional keyword arguments:
+        main_symbol -- Symbol object for the main signal name, such as a
+            device, net, or module port name.
+        port_symbol -- Symbol object for the port name, or None if the signal
+            has no explicit port.
+        is_literal -- True if this Signal represents literal 0 or 1.
+        literal_value -- integer value of the literal when is_literal is True.
+        main_id -- internal ID to use instead of main_symbol.id.
+        port_id -- internal port ID to use instead of port_symbol.id.
+
+        """
         self.main_symbol = main_symbol # The name of the device or net like ANDGATE1
         self.port_symbol = port_symbol
         self.is_literal = is_literal
@@ -36,18 +52,47 @@ class Signal:
             self.port_id = port_id
 
 class ModuleDevice:
-    """Object that details about one device inside a module definition."""
+    """Store one device declared inside a module definition.
+
+    The stored device may be either a primitive device, such as AND or CLOCK,
+    or an instantiation of another user-defined module.
+    """
 
     def __init__(self, symbol, kind_type, kind_name, parameter_value):
+        """Initialise a ModuleDevice object.
+
+        Arguments:
+        symbol -- Symbol object for the device instance name.
+        kind_type -- string identifying the kind as "primitive" or "module".
+        kind_name -- name of the primitive device or module being instantiated.
+        parameter_value -- integer parameter value for parameterised primitive
+            devices, or None if no parameter is used.
+        """
         self.symbol = symbol
         self.kind_type = kind_type      # "primitive" or "module"
         self.kind_name = kind_name      # e.g. "AND" or another module name
         self.parameter_value = parameter_value
 
 class ModuleDefinition:
-    """Object that systematically stores all details of a module definition."""
+    """Store all parser information for one module definition.
+
+    A ModuleDefinition records the module interface, devices, nets,
+    connections, and ID sets needed for duplicate detection and later module
+    expansion.
+    """
 
     def __init__(self, name_symbol, input_symbols, output_symbols):
+        """Initialise a ModuleDefinition object.
+
+        Arguments:
+        name_symbol -- Symbol object for the module name.
+        input_symbols -- list of Symbol objects for the module input ports.
+        output_symbols -- list of Symbol objects for the module output ports.
+
+        Also initialise empty containers for
+        devices, nets, drivers, and connections. Populate input_ids and
+        output_ids from the supplied input and output symbols.
+        """
         self.name_symbol = name_symbol
 
         self.input_symbols = input_symbols
