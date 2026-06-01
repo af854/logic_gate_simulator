@@ -11,7 +11,7 @@ Parser - parses the definition file and builds the logic network.
 
 from parser_objects import Signal, ModuleDefinition, ModuleDevice
 
-MAX_ERROR_MSGS = 7
+MAX_ERROR_MSGS = 10
 
 # Implemented:
 # - Full syntax check
@@ -268,7 +268,7 @@ class Parser:
 ################################################################################
 
     # General error message
-    def error(self, errormsg, symbol=None, synchronize = False, stopping_types=None):
+    def error(self, errormsg, symbol=None, synchronize = False, stopping_types=None, hide_location = False):
         """Print a descriptive error message and increment the error count.
         Takes in error message and Symbol object (default: self.symbol) as arguments. """
         if (symbol == None):
@@ -277,12 +277,9 @@ class Parser:
         if(self.error_count <= MAX_ERROR_MSGS):
             print("---------------------------------------------------------------")
             print("Error: " + errormsg) 
-            print("Line " + str(symbol.line_num+1) + ", column " + str(symbol.line_pos+1)+":")
-            self.scanner.print_error_line(symbol.line_num, symbol.line_pos)
-            if(self.error_count == 1):
-                print("Attempting to skip the affected statement(s) and continue parsing")
-                print("to detect further syntax errors...")
-                print("Network construction and related semantic checks will no longer be attempted. ")
+            if not hide_location:
+                print("Line " + str(symbol.line_num+1) + ", column " + str(symbol.line_pos+1)+":")
+                self.scanner.print_error_line(symbol.line_num, symbol.line_pos)
         if(synchronize):
             self.synchronize(stopping_types)
 
@@ -475,14 +472,8 @@ class Parser:
         if self.symbol.type != self.scanner.KEYWORD:
             return False
 
-        return self.symbol_string() in [
-            "AND",
-            "NAND",
-            "OR",
-            "NOR",
-            "CLOCK",
-            "SWITCH",
-        ]
+        return ((self.symbol.id in self.devices.gate_types and self.symbol.id != self.devices.XOR) or 
+                (self.symbol.id in [self.devices.CLOCK, self.devices.SWITCH]))
 
     def is_fixed_device(self):
         """Check whether the current symbol refers to a KEYWORD that represents a fixed device:
@@ -490,9 +481,9 @@ class Parser:
         if self.symbol.type != self.scanner.KEYWORD:
             return False
 
-        return self.symbol_string() in [
-            "DTYPE",
-            "XOR",
+        return self.symbol.id in [
+            self.devices.XOR,
+            self.devices.D_TYPE,
         ]
 
     def device_exists(self, symbol):
@@ -2029,6 +2020,82 @@ class Parser:
                         self.error("Device input is not driven: "+ device_name + "." + input_name, symbol)
         return 
     
+    def check_combinational_loops(self):
+        """Detect combinational loops using DFS after nets/modules have been flattened. 
+        Return False if there's a combinational loop, True otherwise"""
+
+        # Step 1: Build a graph
+
+        # adjacency list - dict from id to list of ids
+        # source is output device, dest is input device
+        # (we only consider main id here - this is OK since we call this
+        # after module internal devices are already resolved.)
+        graph = {}
+
+        # We already have the stuff we need to build the adjacency list
+        # from pending_connections and the flattened net_driver_dict
+        for input_signal, output_signal in self.pending_connections:
+
+            if self.is_net(output_signal):
+                if output_signal.main_id not in self.net_driver_dict:
+                    continue
+                output_signal = self.net_driver_dict[output_signal.main_id]
+
+            if output_signal.is_literal:
+                continue
+
+            source_id = output_signal.main_id
+            dest_id = input_signal.main_id
+
+            dest_device = self.devices.get_device(dest_id)
+
+            # We only consider combinational devices (not DTYPE, or output-only)
+            # use the existing self.device.gate_types and device_kind
+            if dest_device is None or dest_device.device_kind not in self.devices.gate_types:
+                continue
+
+            if source_id not in graph:
+                graph[source_id] = []
+            if dest_id not in graph:
+                graph[dest_id] = []
+
+            graph[source_id].append(dest_id)
+
+        # Step 2: run BFS on each start device
+
+        for start_id in graph:
+            visited = {start_id} # prevent exploring same node multiple times
+
+            # tuples of (current_node_id, [list of node_ids - the path we took to get there that we print])
+            # Using a queue means its BFS, use BFS instead of DFS to display shortest cycle (easier for user)
+            queue = [(start_id, [start_id])]
+
+            while len(queue) > 0:
+                device_id, path = queue.pop(0)
+
+                for next_id in graph[device_id]:
+                    if next_id == start_id:
+                        # we've found a path from start_id to start_id - a loop
+                        if(len(path)) == 1:
+                            device_name = self.names.get_name_string(start_id)
+                            device_name = " inside ".join(reversed(device_name.split("->")))
+                            self.error("Combinational device self-loop: " + device_name, hide_location=True)
+                            return False
+                        errormsg = "Combinational loop detected. Loop is as follows:\n"
+                        for loop_device_id in path + [start_id]:
+                                device_name = self.names.get_name_string(loop_device_id)
+                                device_name = " inside ".join(reversed(device_name.split("->")))
+                                errormsg += "       "+device_name + "\n"
+
+                        self.error(errormsg, hide_location = True)
+                        return False
+
+                    if next_id not in visited:
+                        visited.add(next_id)
+                        queue.append((next_id, path + [next_id]))
+
+        return True
+    
     def resolve_and_create_connections (self):
         """Resolve all net references in pending_connections, 
         create all the connections in the network, and run semantic checks.
@@ -2043,6 +2110,9 @@ class Parser:
         if not self.flatten_net_driver_dict():
             return
         
+        if not self.check_combinational_loops():
+            return
+
         # TODO net unused / not connected to anything checks
         # may want to keep track of the net instantiation symbols for this
 
@@ -2342,6 +2412,8 @@ class Parser:
                     print("---------------------------------------------------------------")
                 print("*** UNSUCCESSFUL: " + str(self.error_count) + " error(s) found during parsing. ***\n")
                 print("Network not built. Simulation will not start until the definition file is fixed.\n")
+                print("After the first error was found, attempts to build the network and related semantic checks")
+                print("were skipped to prevent cascading errors.\n")
 
                 return False
         
