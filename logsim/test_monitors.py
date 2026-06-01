@@ -1,4 +1,5 @@
 """Test the monitors module."""
+
 import pytest
 
 from names import Names
@@ -15,8 +16,9 @@ def new_monitors():
     new_network = Network(new_names, new_devices)
     new_monitors = Monitors(new_names, new_devices, new_network)
 
-    [SW1_ID, SW2_ID, OR1_ID, I1, I2] = new_names.lookup(["Sw1", "Sw2", "Or1",
-                                                        "I1", "I2"])
+    [SW1_ID, SW2_ID, OR1_ID, I1, I2] = new_names.lookup(
+        ["Sw1", "Sw2", "Or1", "I1", "I2"]
+    )
     # Add 2 switches and an OR gate
     new_devices.make_device(SW1_ID, new_devices.SWITCH, 0)
     new_devices.make_device(SW2_ID, new_devices.SWITCH, 0)
@@ -39,26 +41,32 @@ def test_make_monitor(new_monitors):
     names = new_monitors.names
     [SW1_ID, SW2_ID, OR1_ID] = names.lookup(["Sw1", "Sw2", "Or1"])
 
-    assert new_monitors.monitors_dictionary == {(SW1_ID, None): [],
-                                                (SW2_ID, None): [],
-                                                (OR1_ID, None): []}
+    assert (list(new_monitors.monitors_dictionary.keys())
+            == ["Sw1", "Sw2", "Or1"])
+
+    assert new_monitors.monitors_dictionary["Sw1"].device_id == SW1_ID
+    assert new_monitors.monitors_dictionary["Sw1"].output_id is None
+
+    assert new_monitors.monitors_dictionary["Sw2"].device_id == SW2_ID
+    assert new_monitors.monitors_dictionary["Sw2"].output_id is None
+
+    assert new_monitors.monitors_dictionary["Or1"].device_id == OR1_ID
+    assert new_monitors.monitors_dictionary["Or1"].output_id is None
 
 
 def test_make_monitor_gives_errors(new_monitors):
     """Test if make_monitor returns the correct errors."""
     names = new_monitors.names
-    network = new_monitors.network
     devices = new_monitors.devices
-    [SW1_ID, SW3_ID, OR1_ID, I1, SWITCH_ID] = names.lookup(["Sw1", "Sw3",
-                                                            "Or1", "I1",
-                                                            "SWITCH"])
+    [SW1_ID, SW3_ID, OR1_ID, I1, SWITCH_ID] = names.lookup(
+        ["Sw1", "Sw3", "Or1", "I1", "SWITCH"]
+    )
 
     assert new_monitors.make_monitor(OR1_ID, I1) == new_monitors.NOT_OUTPUT
-    assert new_monitors.make_monitor(SW1_ID,
-                                     None) == new_monitors.MONITOR_PRESENT
+    assert (new_monitors.make_monitor(SW1_ID, None)
+            == new_monitors.MONITOR_PRESENT)
     # I1 is not a device_id in the network
-    assert new_monitors.make_monitor(I1,
-                                     None) == network.DEVICE_ABSENT
+    assert new_monitors.make_monitor(I1, None) == new_monitors.DEVICE_ABSENT
 
     # Make a new switch device
     devices.make_device(SW3_ID, SWITCH_ID, 0)
@@ -71,9 +79,8 @@ def test_remove_monitor(new_monitors):
     names = new_monitors.names
     [SW1_ID, SW2_ID, OR1_ID] = names.lookup(["Sw1", "Sw2", "Or1"])
 
-    new_monitors.remove_monitor(SW1_ID, None)
-    assert new_monitors.monitors_dictionary == {(SW2_ID, None): [],
-                                                (OR1_ID, None): []}
+    new_monitors.remove_monitor("Sw1")
+    assert list(new_monitors.monitors_dictionary.keys()) == ["Sw2", "Or1"]
 
 
 def test_get_signal_names(new_monitors):
@@ -85,8 +92,10 @@ def test_get_signal_names(new_monitors):
     # Create a D-type device
     devices.make_device(D_ID, devices.D_TYPE)
 
-    assert new_monitors.get_signal_names() == [["Sw1", "Sw2", "Or1"],
-                                               ["D1.Q", "D1.QBAR"]]
+    assert new_monitors.get_signal_names() == [
+        ["Sw1", "Sw2", "Or1"],
+        ["D1.Q", "D1.QBAR"],
+    ]
 
 
 def test_record_signals(new_monitors):
@@ -114,18 +123,17 @@ def test_record_signals(new_monitors):
     network.execute_network()
     new_monitors.record_signals()
 
-    assert new_monitors.monitors_dictionary == {
-        (SW1_ID, None): [LOW, HIGH, HIGH],
-        (SW2_ID, None): [LOW, LOW, HIGH],
-        (OR1_ID, None): [LOW, HIGH, HIGH]}
+    assert new_monitors.monitors_dictionary["Sw1"].trace == [LOW, HIGH, HIGH]
+    assert new_monitors.monitors_dictionary["Sw2"].trace == [LOW, LOW, HIGH]
+    assert new_monitors.monitors_dictionary["Or1"].trace == [LOW, HIGH, HIGH]
 
 
 def test_get_margin(new_monitors):
     """Test if get_margin returns the length of the longest monitor name."""
     names = new_monitors.names
     devices = new_monitors.devices
-    [D_ID, DTYPE_ID, QBAR_ID, Q_ID] = names.lookup(["Dtype1", "DTYPE",
-                                                    "QBAR", "Q"])
+    [D_ID, DTYPE_ID, QBAR_ID, Q_ID] = names.lookup(
+        ["Dtype1", "DTYPE", "QBAR", "Q"])
 
     # Create a D-type device and set monitors on its outputs
     devices.make_device(D_ID, DTYPE_ID)
@@ -145,13 +153,15 @@ def test_reset_monitors(new_monitors):
     LOW = devices.LOW
     new_monitors.record_signals()
     new_monitors.record_signals()
-    assert new_monitors.monitors_dictionary == {(SW1_ID, None): [LOW, LOW],
-                                                (SW2_ID, None): [LOW, LOW],
-                                                (OR1_ID, None): [LOW, LOW]}
+    assert new_monitors.monitors_dictionary["Sw1"].trace == [LOW, LOW]
+    assert new_monitors.monitors_dictionary["Sw2"].trace == [LOW, LOW]
+    assert new_monitors.monitors_dictionary["Or1"].trace == [LOW, LOW]
+
     new_monitors.reset_monitors()
-    assert new_monitors.monitors_dictionary == {(SW1_ID, None): [],
-                                                (SW2_ID, None): [],
-                                                (OR1_ID, None): []}
+
+    assert new_monitors.monitors_dictionary["Sw1"].trace == []
+    assert new_monitors.monitors_dictionary["Sw2"].trace == []
+    assert new_monitors.monitors_dictionary["Or1"].trace == []
 
 
 def test_display_signals(capsys, new_monitors):
@@ -191,9 +201,58 @@ def test_display_signals(capsys, new_monitors):
     assert "Or1   : __________----------" in traces
 
     # Clock could be anywhere in its cycle, but its half period is 2
-    assert ("Clock1: __--__--__--__--__--" in traces or
-            "Clock1: _--__--__--__--__--_" in traces or
-            "Clock1: --__--__--__--__--__" in traces or
-            "Clock1: -__--__--__--__--__-" in traces)
+    assert (
+        "Clock1: __--__--__--__--__--" in traces
+        or "Clock1: _--__--__--__--__--_" in traces
+        or "Clock1: --__--__--__--__--__" in traces
+        or "Clock1: -__--__--__--__--__-" in traces
+    )
 
     assert "" in traces  # additional empty line at the end
+
+
+def test_make_monitor_with_requested_name(new_monitors):
+    """Test storing a requested display name different from source device."""
+    names = new_monitors.names
+    [OR1_ID] = names.lookup(["Or1"])
+
+    result = new_monitors.make_monitor(OR1_ID, None, requested_name="Net1")
+
+    assert result == new_monitors.NO_ERROR
+    assert "Net1" in new_monitors.monitors_dictionary
+
+    monitor = new_monitors.monitors_dictionary["Net1"]
+    assert monitor.requested_name == "Net1"
+    assert monitor.device_id == OR1_ID
+    assert monitor.output_id is None
+    assert monitor.trace == []
+
+
+def test_same_output_can_have_different_requested_names(new_monitors):
+    """Test same output device can be monitored under different names."""
+    names = new_monitors.names
+    [OR1_ID] = names.lookup(["Or1"])
+
+    assert (
+        new_monitors.make_monitor(OR1_ID, None, requested_name="Net1")
+        == new_monitors.NO_ERROR
+    )
+
+    assert (
+        new_monitors.make_monitor(OR1_ID, None, requested_name="Or1_alias")
+        == new_monitors.NO_ERROR
+    )
+
+    assert "Net1" in new_monitors.monitors_dictionary
+    assert "Or1_alias" in new_monitors.monitors_dictionary
+
+    assert new_monitors.monitors_dictionary["Net1"].device_id == OR1_ID
+    assert new_monitors.monitors_dictionary["Or1_alias"].device_id == OR1_ID
+
+
+def test_remove_monitor_by_requested_name(new_monitors):
+    """Test remove_monitor removes by requested display name."""
+    assert new_monitors.remove_monitor("Sw1") is True
+    assert "Sw1" not in new_monitors.monitors_dictionary
+
+    assert new_monitors.remove_monitor("nonexistent") is False

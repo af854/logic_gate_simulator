@@ -141,14 +141,18 @@ def test_make_connection(network_with_devices):
 
 @pytest.mark.parametrize("function_args, error", [
     # I1 is not a valid device id
-    ("(I1, I1, OR1_ID, I2)", "network.DEVICE_ABSENT"),
+    ("(I1, I1, OR1_ID, I2)", "network.FIRST_DEVICE_ABSENT"),
 
     ("(OR1_ID, I2, OR1_ID, I2)", "network.INPUT_TO_INPUT"),
 
     ("(SW1_ID, None, OR1_ID, None)", "network.OUTPUT_TO_OUTPUT"),
 
     # Switch device does not have port I1, so give PORT_ABSENT_ERROR
-    ("(SW1_ID, I1, OR1_ID, I2)", "network.PORT_ABSENT"),
+    ("(SW1_ID, I1, OR1_ID, I2)", "network.FIRST_PORT_ABSENT"),
+
+    ("(SW1_ID, None, OR1_ID, SW1_ID)", "network.SECOND_PORT_ABSENT"),
+    ("(SW1_ID, None, I2, I2)", "network.SECOND_DEVICE_ABSENT"),
+
 
     # Output first
     ("(SW2_ID, None, OR1_ID, I2)", "network.NO_ERROR"),
