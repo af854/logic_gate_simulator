@@ -13,6 +13,9 @@ import wx.lib.buttons as wxbuttons
 import wx.glcanvas as wxcanvas
 from OpenGL import GL, GLUT
 import csv
+import contextlib
+import io
+import os
 
 from names import Names
 from devices import Devices
@@ -55,10 +58,10 @@ from parse import Parser
 # - Option to change the colour scheme (e.g. dark mode) of the waveform display for better accessibility
 # - File upload so that different files can be tested without restarting the program
 # - panels are collapsible if user does not want them visible, e.g. the available signals panel can be very long and is not always needed
+# - Help menu with instructions on how to use the GUI and explanations of the different features, e.g. the mouse controls for panning and zooming the waveform display
 
 # ----- Features to add -----
 # - Slider that shows the value of all signals at a particular cycle that can be dragged back and forth to explore the history of the simulation
-# - Add a help menu with instructions on how to use the GUI and explanations of the different features, e.g. the mouse controls for panning and zooming the waveform display
 
 # ----- Features that were considered but ultimately not implemented -----
 # - Live tracing mode where the display updates in real time as the simulation runs, instead of only after the user clicks 'Run cycles'
@@ -90,7 +93,7 @@ ID_TOGGLE_THEME = wx.NewIdRef()
 ID_SHOW_AVAILABLE_SIGNALS = wx.NewIdRef()
 ID_SHOW_SIMULATION = wx.NewIdRef()
 ID_SHOW_SWITCHES = wx.NewIdRef()
-ID_SHOW_STATUS = wx.NewIdRef()
+ID_SHOW_CONSOLE = wx.NewIdRef()
 
 
 THEMES = {
@@ -141,6 +144,10 @@ THEMES = {
 }
 
 EXTERNAL_DOCUMENTATION_URL = ""
+LIGHT_CLOSE_ICON_PATH = os.path.join(os.path.dirname(__file__), "icons", "x_icon_light.png")
+DARK_CLOSE_ICON_PATH = os.path.join(os.path.dirname(__file__), "icons", "x_icon_dark.png")
+LIGHT_MODE_ICON_PATH = os.path.join(os.path.dirname(__file__), "icons", "light_mode.png")
+DARK_MODE_ICON_PATH = os.path.join(os.path.dirname(__file__), "icons", "dark_mode.png")
 
 
 def add_signal_to_module_tree(module_tree, full_signal_name, value):
@@ -798,7 +805,7 @@ class Gui(wx.Frame):
         self.window_menu_items = {"available_signals": window_menu.Append(ID_SHOW_AVAILABLE_SIGNALS, "Show Available signals\tctrl+1"),
                                   "simulation": window_menu.Append(ID_SHOW_SIMULATION, "Show Simulation\tctrl+2"),
                                   "switches": window_menu.Append(ID_SHOW_SWITCHES, "Show Switches\tctrl+3"),
-                                  "status": window_menu.Append(ID_SHOW_STATUS, "Show Status\tctrl+4")}
+                                  "console": window_menu.Append(ID_SHOW_CONSOLE, "Show Console\tctrl+4")}
         
         menu_bar.Append(file_menu, "&File")
         menu_bar.Append(view_menu, "&View")
@@ -821,12 +828,14 @@ class Gui(wx.Frame):
         self.run_cycles_button = wx.Button(self, wx.ID_ANY, "Run cycles")
         self.reset_button = wx.Button(self, wx.ID_ANY, "Reset simulation")
         self.clear_traces_button = wx.Button(self, wx.ID_ANY, "Clear traces")
-        self.status_box = wx.TextCtrl(self, wx.ID_ANY, "", style=wx.TE_MULTILINE | wx.TE_READONLY)
-        self.status_box.SetMinSize((175, 90))
-        self.clear_status_button = wx.Button(self, wx.ID_ANY, "Clear status")
+        self.console_box = wx.TextCtrl(self, wx.ID_ANY, "", style=wx.TE_MULTILINE | wx.TE_READONLY)
+        self.console_box.SetMinSize((-1, 90))
+        self.clear_status_button = wx.Button(self, wx.ID_ANY, "Clear console")
+        self.toggle_theme_button = wx.Button(self, wx.ID_ANY, "", size=(34, 34))
+        self.toggle_theme_button.SetMinSize((34, 34))
         self.switch_rows = wx.ScrolledWindow(self, wx.ID_ANY, style=wx.VSCROLL | wx.BORDER_SIMPLE)
         self.switch_rows.SetScrollRate(0, 10)
-        self.switch_rows.SetMinSize((-1, 140))
+        self.switch_rows.SetMinSize((100, 140))
         self.switch_rows_sizer = wx.BoxSizer(wx.VERTICAL)
         self.switch_rows.SetSizer(self.switch_rows_sizer)
         self.switch_state_buttons = {}
@@ -868,6 +877,7 @@ class Gui(wx.Frame):
         self.reset_button.Bind(wx.EVT_BUTTON, self.on_reset_button)
         self.clear_traces_button.Bind(wx.EVT_BUTTON, self.on_clear_traces)
         self.clear_status_button.Bind(wx.EVT_BUTTON, self.on_clear_status)
+        self.toggle_theme_button.Bind(wx.EVT_BUTTON, self.on_toggle_theme)
 
         self.Bind(wx.EVT_MENU, self.on_run_cycles_button, id=ID_RUN)
         self.Bind(wx.EVT_MENU, self.on_run_one_cycle, id=ID_RUN_ONE)
@@ -883,7 +893,7 @@ class Gui(wx.Frame):
         self.Bind(wx.EVT_MENU, self.on_show_section, id=ID_SHOW_AVAILABLE_SIGNALS)
         self.Bind(wx.EVT_MENU, self.on_show_section, id=ID_SHOW_SIMULATION)
         self.Bind(wx.EVT_MENU, self.on_show_section, id=ID_SHOW_SWITCHES)
-        self.Bind(wx.EVT_MENU, self.on_show_section, id=ID_SHOW_STATUS)
+        self.Bind(wx.EVT_MENU, self.on_show_section, id=ID_SHOW_CONSOLE)
 
         # Keyboard shortcuts call the same handlers as the buttons
         accelerators = wx.AcceleratorTable([
@@ -900,13 +910,14 @@ class Gui(wx.Frame):
             (wx.ACCEL_CTRL, ord("1"), ID_SHOW_AVAILABLE_SIGNALS),  # Ctrl+1: show available signals
             (wx.ACCEL_CTRL, ord("2"), ID_SHOW_SIMULATION),  # Ctrl+2: show simulation
             (wx.ACCEL_CTRL, ord("3"), ID_SHOW_SWITCHES),  # Ctrl+3: show switches
-            (wx.ACCEL_CTRL, ord("4"), ID_SHOW_STATUS),  # Ctrl+4: show status
+            (wx.ACCEL_CTRL, ord("4"), ID_SHOW_CONSOLE),  # Ctrl+4: show console
             (wx.ACCEL_NORMAL, wx.WXK_F1, ID_HELP),  # F1: help
             (wx.ACCEL_CTRL, ord("Q"), wx.ID_EXIT),  # Ctrl+Q: exit
-            (wx.ACCEL_NORMAL, wx.WXK_DELETE, ID_CLEAR_STATUS)])  # Delete: clear status
+            (wx.ACCEL_NORMAL, wx.WXK_DELETE, ID_CLEAR_STATUS)])  # Delete: clear console
         self.SetAcceleratorTable(accelerators)
 
         # Configure sizers for layout
+        root_sizer = wx.BoxSizer(wx.VERTICAL)
         main_sizer = wx.BoxSizer(wx.HORIZONTAL)
         side_sizer = wx.BoxSizer(wx.VERTICAL)
         self.section_panels = {}
@@ -930,6 +941,7 @@ class Gui(wx.Frame):
         simulation_sizer.Add(self.clear_traces_button, 0, wx.EXPAND | wx.ALL, 6)
 
         switch_panel, switch_sizer = self.create_section_panel("Switches", "switches")
+        switch_panel.SetMinSize((180, 230))
         self.switch_rows.Reparent(switch_panel)
         switch_sizer.Add(self.switch_rows, 1, wx.EXPAND | wx.ALL, 6)
 
@@ -937,28 +949,30 @@ class Gui(wx.Frame):
         self.module_signal_rows.Reparent(signal_panel)
         signal_sizer.Add(self.module_signal_rows, 1, wx.EXPAND | wx.ALL, 6)
 
-        status_panel, status_sizer = self.create_section_panel("Status", "status")
-        self.status_box.Reparent(status_panel)
-        self.clear_status_button.Reparent(status_panel)
-        status_sizer.Add(self.status_box, 1, wx.EXPAND | wx.ALL, 6)
-        status_sizer.Add(self.clear_status_button, 0, wx.EXPAND | wx.ALL, 6)
+        console_panel, console_sizer = self.create_section_panel("Console", "console")
+        self.console_box.Reparent(console_panel)
+        console_sizer.Add(self.console_box, 1, wx.EXPAND | wx.ALL, 6)
 
+        self.toggle_theme_button.Reparent(self)
+        side_sizer.Add(self.toggle_theme_button, 0, wx.ALIGN_RIGHT | wx.BOTTOM, 8)
         side_sizer.Add(simulation_panel, 0, wx.EXPAND | wx.BOTTOM, 8)
         side_sizer.Add(switch_panel, 1, wx.EXPAND | wx.BOTTOM, 8)
-        side_sizer.Add(status_panel, 0, wx.EXPAND)
 
         main_sizer.Add(signal_panel, 0, wx.EXPAND | wx.ALL, 8)
         main_sizer.Add(self.canvas, 4, wx.EXPAND | wx.ALL, 5)
         main_sizer.Add(side_sizer, 0, wx.EXPAND | wx.ALL, 8)
 
-        self.SetSizer(main_sizer)
+        root_sizer.Add(main_sizer, 1, wx.EXPAND)
+        root_sizer.Add(console_panel, 0, wx.EXPAND | wx.LEFT | wx.RIGHT | wx.BOTTOM, 8)
+
+        self.SetSizer(root_sizer)
         self.update_switch_rows()
         self.update_module_signal_rows()
         self.apply_theme()
         self.update_section_window_menu()
 
         # Prevent the user from shrinking the window so much that the controls or canvas become unusable
-        main_sizer.SetSizeHints(self)
+        root_sizer.SetSizeHints(self)
         best_size = self.GetBestSize()
         minimum_width = max(best_size.width, 800)
         minimum_height = max(best_size.height, 650)
@@ -968,6 +982,8 @@ class Gui(wx.Frame):
         current_size = self.GetSize()
         if current_size.width < minimum_width or current_size.height < minimum_height:
             self.SetSize((minimum_width, minimum_height))
+
+        self.Centre()
 
 ###############################################################################
 # MENU AND SIMULATION EVENT HANDLERS
@@ -1017,8 +1033,8 @@ class Gui(wx.Frame):
             "Ctrl+1: show Available signals panel\n"
             "Ctrl+2: show Simulation panel\n"
             "Ctrl+3: show Switches panel\n"
-            "Ctrl+4: show Status panel\n"
-            "Delete: clear status messages\n"
+            "Ctrl+4: show Console panel\n"
+            "Delete: clear console messages\n"
             "Ctrl+Q: exit",
             "Keyboard Shortcuts", wx.ICON_INFORMATION | wx.OK)
 
@@ -1110,7 +1126,7 @@ class Gui(wx.Frame):
 
     def show_status(self, message):
         """Display a status message in the GUI."""
-        self.status_box.AppendText(message + "\n")
+        self.console_box.AppendText(message + "\n")
         self.set_status(message)
 
     def set_status(self, message):
@@ -1202,8 +1218,8 @@ class Gui(wx.Frame):
         self.show_status("Cleared traces.")
 
     def on_clear_status(self, event):
-        """Clear the status history."""
-        self.status_box.SetValue("")
+        """Clear the console history."""
+        self.console_box.SetValue("")
         self.set_status("Ready")
 
     def on_zoom_in(self, event):
@@ -1248,7 +1264,7 @@ class Gui(wx.Frame):
         elif menu_id == ID_SHOW_SWITCHES:
             section_name = "switches"
         else:
-            section_name = "status"
+            section_name = "console"
 
         self.section_panels[section_name].Show()
         self.section_close_buttons[section_name].SetLabel("X")
@@ -1311,12 +1327,15 @@ class Gui(wx.Frame):
         body_sizer = wx.BoxSizer(wx.VERTICAL)
 
         title_label = wx.StaticText(panel, wx.ID_ANY, title)
-        close_button = wxbuttons.GenButton(panel, wx.ID_ANY, "X", size=(30, 26))
+        close_button = wxbuttons.GenBitmapButton(panel, wx.ID_ANY, wx.Bitmap(1, 1), size=(30, 26))
         close_button.SetMinSize((30, 26))
         close_button.SetName(section_name)
         close_button.Bind(wx.EVT_BUTTON, self.on_close_section)
 
         header_sizer.Add(title_label, 1, wx.ALIGN_CENTER_VERTICAL | wx.LEFT, 6)
+        if section_name == "console":
+            self.clear_status_button.Reparent(panel)
+            header_sizer.Add(self.clear_status_button, 0, wx.RIGHT | wx.TOP, 4)
         header_sizer.Add(close_button, 0, wx.RIGHT | wx.TOP, 4)
         panel_sizer.Add(header_sizer, 0, wx.EXPAND)
         panel_sizer.Add(body_sizer, 1, wx.EXPAND)
@@ -1361,9 +1380,10 @@ class Gui(wx.Frame):
             self.theme_menu_item.SetItemLabel("Switch to light mode\tctrl+shift+T")
         else:
             self.theme_menu_item.SetItemLabel("Switch to dark mode\tctrl+shift+T")
+        self.apply_theme_toggle_button()
 
         self.SetBackgroundColour(self.theme["frame_bg"])
-        self.apply_theme_to_text_box(self.status_box)
+        self.apply_theme_to_text_box(self.console_box)
         self.menu_bar.SetBackgroundColour(self.theme["frame_bg"])
         self.menu_bar.SetForegroundColour(self.theme["text"])
 
@@ -1374,6 +1394,7 @@ class Gui(wx.Frame):
                            self.reset_button,
                            self.clear_traces_button,
                            self.clear_status_button,
+                           self.toggle_theme_button,
                            self.switch_rows,
                            self.module_signal_rows,
                            self.monitor_rows]
@@ -1426,14 +1447,64 @@ class Gui(wx.Frame):
         text_box.Refresh()
         text_box.Update()
 
+    def load_icon_bitmap(self, icon_path, size):
+        """Return a scaled bitmap for an icon path, or None if it cannot load."""
+        if not os.path.exists(icon_path):
+            return None
+
+        image = wx.Image(icon_path, wx.BITMAP_TYPE_ANY)
+        if not image.IsOk():
+            return None
+
+        image = image.Scale(size, size, wx.IMAGE_QUALITY_HIGH)
+        return wx.Bitmap(image)
+
+    def apply_theme_toggle_button(self):
+        """Apply icon to the day/night mode button."""
+        if self.theme_name == "dark":
+            icon_path = LIGHT_MODE_ICON_PATH
+            fallback_label = "Light"
+            tooltip = "Switch to light mode"
+        else:
+            icon_path = DARK_MODE_ICON_PATH
+            fallback_label = "Dark"
+            tooltip = "Switch to dark mode"
+
+        bitmap = self.load_icon_bitmap(icon_path, 20)
+        self.toggle_theme_button.SetToolTip(tooltip)
+
+        if bitmap is not None:
+            self.toggle_theme_button.SetLabel("")
+            self.toggle_theme_button.SetBitmap(bitmap)
+        else:
+            self.toggle_theme_button.SetLabel(fallback_label)
+            self.toggle_theme_button.SetBitmap(wx.NullBitmap)
+
+        self.toggle_theme_button.Refresh()
+
     def apply_close_button_theme(self, button):
         """Apply colours to a small close button"""
-        button.SetLabel("X")
-        button.SetBackgroundColour(self.theme["button_bg"])
+        button.SetBackgroundColour(self.theme["frame_bg"])
         button.SetForegroundColour(self.theme["text"])
 
         if hasattr(button, "SetBezelWidth"):
-            button.SetBezelWidth(1)
+            button.SetBezelWidth(0)
+        if hasattr(button, "SetUseFocusIndicator"):
+            button.SetUseFocusIndicator(False)
+
+        if self.theme_name == "dark":
+            icon_path = DARK_CLOSE_ICON_PATH
+        else:
+            icon_path = LIGHT_CLOSE_ICON_PATH
+
+        bitmap = self.load_icon_bitmap(icon_path, 14)
+        if bitmap is not None:
+            button.SetLabel("")
+            button.SetBitmapLabel(bitmap)
+            button.SetToolTip("Close section")
+        else:
+            button.SetLabel("X")
+            button.SetBitmapLabel(wx.Bitmap(1, 1))
 
         button.Refresh()
         button.Update()
@@ -1483,12 +1554,19 @@ class Gui(wx.Frame):
         devices = Devices(names)
         network = Network(names, devices)
         monitors = Monitors(names, devices, network)
-        scanner = Scanner(path, names)
-        parser = Parser(names, devices, network, monitors, scanner)
+        parser_output = io.StringIO()
 
-        if not parser.parse_network():
+        with contextlib.redirect_stdout(parser_output), contextlib.redirect_stderr(parser_output):
+            scanner = Scanner(path, names)
+            parser = Parser(names, devices, network, monitors, scanner)
+            parsed_ok = parser.parse_network()
+
+        if not parsed_ok:
             message = f"Could not load circuit file:\n{path}"
             self.show_status(f"Error: could not load {path}.")
+            error_text = parser_output.getvalue().strip()
+            if error_text:
+                self.console_box.AppendText(error_text + "\n")
             wx.MessageBox(message, "Invalid circuit file", wx.ICON_ERROR | wx.OK)
             return False
 
