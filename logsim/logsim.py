@@ -9,6 +9,7 @@ Usage
 Show help: logsim.py -h
 Command line user interface: logsim.py -c <file path>
 Graphical user interface: logsim.py <file path>
+Blank graphical user interface: logsim.py
 """
 import getopt
 import sys
@@ -34,7 +35,8 @@ def main(arg_list):
     usage_message = ("Usage:\n"
                      "Show help: logsim.py -h\n"
                      "Command line user interface: logsim.py -c <file path>\n"
-                     "Graphical user interface: logsim.py <file path>")
+                     "Graphical user interface: logsim.py <file path>\n"
+                     "Blank graphical user interface: logsim.py")
     try:
         options, arguments = getopt.getopt(arg_list, "hc:")
     except getopt.GetoptError:
@@ -66,22 +68,31 @@ def main(arg_list):
 
     if not options:  # no option given, use the graphical user interface
 
-        if len(arguments) != 1:  # wrong number of arguments
-            print("Error: one file path required\n")
+        if len(arguments) > 1:  # wrong number of arguments
+            print("Error: at most one file path may be given\n")
             print(usage_message)
             sys.exit()
 
-        [path] = arguments
-        scanner = Scanner(path, names)
-        parser = Parser(names, devices, network, monitors, scanner)
-        if parser.parse_network():
-            # Initialise an instance of the gui.Gui() class
-            app = wx.App()
-            gui = Gui("Logic Simulator", path, names, devices, network,
-                      monitors, parser.net_driver_dict)     
-                        # Tiny change by Kevin, pass net_driver_dict to GUI
-            gui.Show(True)
-            app.MainLoop()
+        # Small change by Arwa to allow the gui to open without a file path argument (it'll show a status message in that case)
+        app = wx.App()
+        if len(arguments) == 1:
+            [path] = arguments
+            scanner = Scanner(path, names)
+            parser = Parser(names, devices, network, monitors, scanner)
+            if parser.parse_network():
+                # Initialise an instance of the gui.Gui() class
+                gui = Gui("Logic Simulator", path, names, devices, network,
+                          monitors, parser.net_driver_dict)
+                # Tiny change by Kevin, pass net_driver_dict to GUI
+            else:
+                sys.exit()
+        else:
+            gui = Gui("Logic Simulator", None, names, devices, network,
+                      monitors, {})
+            gui.show_status("No circuit loaded. Use File > Open to load one.")
+
+        gui.Show(True)
+        app.MainLoop()
 
 
 if __name__ == "__main__":

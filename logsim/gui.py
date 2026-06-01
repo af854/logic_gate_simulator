@@ -73,6 +73,12 @@ from parse import Parser
 
 # wxPython uses ID numbers to connect shortcuts and menu events to handlers
 ID_RUN = wx.NewIdRef()
+ID_RUN_ONE = wx.NewIdRef()
+ID_UNDO_CYCLE = wx.NewIdRef()
+ID_HELP = wx.NewIdRef()
+ID_HELP_SHORTCUTS = wx.NewIdRef()
+ID_HELP_SYNTAX = wx.NewIdRef()
+ID_HELP_EXTERNAL_DOCS = wx.NewIdRef()
 ID_CLEAR_STATUS = wx.NewIdRef()
 ID_RESET_VIEW = wx.NewIdRef()
 ID_EXPORT_IMAGE = wx.NewIdRef()
@@ -133,6 +139,8 @@ THEMES = {
         "canvas_trace": (0.42, 0.68, 1.0),
     },
 }
+
+EXTERNAL_DOCUMENTATION_URL = ""
 
 
 def add_signal_to_module_tree(module_tree, full_signal_name, value):
@@ -385,6 +393,7 @@ class MyGLCanvas(wxcanvas.GLCanvas):
             self.pan_y -= event.GetY() - self.last_mouse_y
             self.last_mouse_x = event.GetX()
             self.last_mouse_y = event.GetY()
+            self.limit_top_left_pan()
             self.init = False
         if event.GetWheelRotation() < 0:
             self.zoom *= (1.0 + (
@@ -392,6 +401,7 @@ class MyGLCanvas(wxcanvas.GLCanvas):
             # Adjust pan so as to zoom around the mouse position
             self.pan_x -= (self.zoom - old_zoom) * ox
             self.pan_y -= (self.zoom - old_zoom) * oy
+            self.limit_top_left_pan()
             self.init = False
         if event.GetWheelRotation() > 0:
             self.zoom /= (1.0 - (
@@ -399,8 +409,16 @@ class MyGLCanvas(wxcanvas.GLCanvas):
             # Adjust pan so as to zoom around the mouse position
             self.pan_x -= (self.zoom - old_zoom) * ox
             self.pan_y -= (self.zoom - old_zoom) * oy
+            self.limit_top_left_pan()
             self.init = False
         self.Refresh()  # triggers the paint event
+
+    def limit_top_left_pan(self):
+        """Prevent dragging the waveform past its top-left starting corner."""
+        if self.pan_x > 0:
+            self.pan_x = 0
+        if self.pan_y < 0:
+            self.pan_y = 0
 
     def zoom_at_canvas_centre(self, factor):
         """Zoom around the centre of the canvas."""
@@ -415,6 +433,7 @@ class MyGLCanvas(wxcanvas.GLCanvas):
         self.zoom *= factor
         self.pan_x -= (self.zoom - old_zoom) * object_x
         self.pan_y -= (self.zoom - old_zoom) * object_y
+        self.limit_top_left_pan()
 
         # The view has changed so init_gl() must run again before drawing
         self.init = False
@@ -743,18 +762,26 @@ class Gui(wx.Frame):
 
         # Total cycles since the last reset
         self.total_cycles_completed = 0
+        self.simulation_history = []
 
         # Configure the file menu
         file_menu = wx.Menu()
         export_menu = wx.Menu()
         view_menu = wx.Menu()
         window_menu = wx.Menu()
+        help_menu = wx.Menu()
         menu_bar = wx.MenuBar()
 
         file_menu.Append(ID_OPEN_FILE, "&Open...\tctrl+O")
         file_menu.AppendSeparator()
-        file_menu.Append(wx.ID_ABOUT, "&About\tF1")
         file_menu.Append(wx.ID_EXIT, "&Exit\tctrl+Q")
+        help_menu.Append(ID_HELP, "&Quick start\tF1")
+        help_menu.Append(ID_HELP_SHORTCUTS, "&Keyboard shortcuts")
+        help_menu.Append(ID_HELP_SYNTAX, "&Circuit file syntax")
+        help_menu.AppendSeparator()
+        help_menu.Append(ID_HELP_EXTERNAL_DOCS, "External &documentation")
+        help_menu.AppendSeparator()
+        help_menu.Append(wx.ID_ABOUT, "&About")
         export_menu.Append(ID_EXPORT_IMAGE, "Export as PNG\tctrl+shift+P")
         export_menu.Append(ID_EXPORT_CSV, "Export as CSV\tctrl+shift+E")
         view_menu.Append(ID_ZOOM_IN, "Zoom in\tctrl+=")
@@ -777,6 +804,7 @@ class Gui(wx.Frame):
         menu_bar.Append(view_menu, "&View")
         menu_bar.Append(window_menu, "&Window")
         menu_bar.Append(export_menu, "&Export")
+        menu_bar.Append(help_menu, "&Help")
 
         self.menu_bar = menu_bar
         self.SetMenuBar(menu_bar)
@@ -789,14 +817,12 @@ class Gui(wx.Frame):
 
         # Configure the widgets
         self.text = wx.StaticText(self, wx.ID_ANY, "Cycles to run")
-        self.spin = wx.SpinCtrl(self, wx.ID_ANY, "10")
-        self.spin.SetRange(1, 100000)
         self.cycles_completed_text = wx.StaticText(self, wx.ID_ANY, "Cycles passed: 0")
         self.run_cycles_button = wx.Button(self, wx.ID_ANY, "Run cycles")
         self.reset_button = wx.Button(self, wx.ID_ANY, "Reset simulation")
         self.clear_traces_button = wx.Button(self, wx.ID_ANY, "Clear traces")
         self.status_box = wx.TextCtrl(self, wx.ID_ANY, "", style=wx.TE_MULTILINE | wx.TE_READONLY)
-        self.status_box.SetMinSize((-1, 90))
+        self.status_box.SetMinSize((175, 90))
         self.clear_status_button = wx.Button(self, wx.ID_ANY, "Clear status")
         self.switch_rows = wx.ScrolledWindow(self, wx.ID_ANY, style=wx.VSCROLL | wx.BORDER_SIMPLE)
         self.switch_rows.SetScrollRate(0, 10)
@@ -834,12 +860,18 @@ class Gui(wx.Frame):
 
         # Bind events to widgets
         self.Bind(wx.EVT_MENU, self.on_menu)
+        self.Bind(wx.EVT_MENU, self.on_help, id=ID_HELP)
+        self.Bind(wx.EVT_MENU, self.on_keyboard_shortcuts_help, id=ID_HELP_SHORTCUTS)
+        self.Bind(wx.EVT_MENU, self.on_syntax_help, id=ID_HELP_SYNTAX)
+        self.Bind(wx.EVT_MENU, self.on_external_documentation, id=ID_HELP_EXTERNAL_DOCS)
         self.run_cycles_button.Bind(wx.EVT_BUTTON, self.on_run_cycles_button)
         self.reset_button.Bind(wx.EVT_BUTTON, self.on_reset_button)
         self.clear_traces_button.Bind(wx.EVT_BUTTON, self.on_clear_traces)
         self.clear_status_button.Bind(wx.EVT_BUTTON, self.on_clear_status)
 
         self.Bind(wx.EVT_MENU, self.on_run_cycles_button, id=ID_RUN)
+        self.Bind(wx.EVT_MENU, self.on_run_one_cycle, id=ID_RUN_ONE)
+        self.Bind(wx.EVT_MENU, self.on_undo_cycle, id=ID_UNDO_CYCLE)
         self.Bind(wx.EVT_MENU, self.on_clear_status, id=ID_CLEAR_STATUS)
         self.Bind(wx.EVT_MENU, self.on_reset_view, id=ID_RESET_VIEW)
         self.Bind(wx.EVT_MENU, self.on_export_image, id=ID_EXPORT_IMAGE)
@@ -856,6 +888,8 @@ class Gui(wx.Frame):
         # Keyboard shortcuts call the same handlers as the buttons
         accelerators = wx.AcceleratorTable([
             (wx.ACCEL_NORMAL, wx.WXK_SPACE, ID_RUN),  # Space: run cycles
+            (wx.ACCEL_NORMAL, wx.WXK_RIGHT, ID_RUN_ONE),  # Right arrow: run one cycle
+            (wx.ACCEL_NORMAL, wx.WXK_LEFT, ID_UNDO_CYCLE),  # Left arrow: undo one cycle
             (wx.ACCEL_CTRL, ord("O"), ID_OPEN_FILE),  # Ctrl+O: open file
             (wx.ACCEL_CTRL, ord("="), ID_ZOOM_IN),  # Ctrl+=: zoom in
             (wx.ACCEL_CTRL, ord("-"), ID_ZOOM_OUT),  # Ctrl+-: zoom out
@@ -867,7 +901,7 @@ class Gui(wx.Frame):
             (wx.ACCEL_CTRL, ord("2"), ID_SHOW_SIMULATION),  # Ctrl+2: show simulation
             (wx.ACCEL_CTRL, ord("3"), ID_SHOW_SWITCHES),  # Ctrl+3: show switches
             (wx.ACCEL_CTRL, ord("4"), ID_SHOW_STATUS),  # Ctrl+4: show status
-            (wx.ACCEL_NORMAL, wx.WXK_F1, wx.ID_ABOUT),  # F1: about
+            (wx.ACCEL_NORMAL, wx.WXK_F1, ID_HELP),  # F1: help
             (wx.ACCEL_CTRL, ord("Q"), wx.ID_EXIT),  # Ctrl+Q: exit
             (wx.ACCEL_NORMAL, wx.WXK_DELETE, ID_CLEAR_STATUS)])  # Delete: clear status
         self.SetAcceleratorTable(accelerators)
@@ -880,8 +914,10 @@ class Gui(wx.Frame):
         self.section_close_buttons = {}
 
         simulation_panel, simulation_sizer = self.create_section_panel("Simulation", "simulation")
+        self.spin = wx.SpinCtrl(simulation_panel, wx.ID_ANY, "10")
+        self.spin.SetRange(1, 100000)
+        self.spin.SetMinSize((120, -1))
         self.text.Reparent(simulation_panel)
-        self.spin.Reparent(simulation_panel)
         self.cycles_completed_text.Reparent(simulation_panel)
         self.run_cycles_button.Reparent(simulation_panel)
         self.reset_button.Reparent(simulation_panel)
@@ -944,10 +980,66 @@ class Gui(wx.Frame):
             self.Close(True)
         if Id == wx.ID_ABOUT:
             wx.MessageBox(
-                "Logic Simulator",
-                "About Logsim",
-                wx.ICON_INFORMATION | wx.OK,
-            )
+                "Logic Simulator\n\n"
+                "A graphical logic circuit simulator for the GF2 Software "
+                "project.\n\n"
+                "Use it to load circuit definition files, run simulations "
+                "cycle by cycle, toggle switch inputs, monitor output "
+                "signals, and export waveform traces as PNG or CSV files.",
+                "About Logsim", wx.ICON_INFORMATION | wx.OK)
+
+    def on_help(self, event):
+        """Show a short guide to the main GUI workflow."""
+        wx.MessageBox(
+            "1. Open a circuit definition file from File > Open.\n"
+            "2. Use the Switches panel to set switch inputs LOW or HIGH.\n"
+            "3. Add signals from the Available signals panel to display them.\n"
+            "4. Choose the number of cycles to run and click Run cycles.\n"
+            "5. Use Clear traces to clear the waveform history without resetting switches.\n"
+            "6. Use Reset simulation to restart the circuit and clear all traces.\n"
+            "7. Export the waveform as PNG or the trace data as CSV from the Export menu.",
+            "Quick Start", wx.ICON_INFORMATION | wx.OK)
+
+    def on_keyboard_shortcuts_help(self, event):
+        """Show keyboard shortcuts."""
+        wx.MessageBox(
+            "F1: quick start help\n"
+            "Space: run the selected number of cycles\n"
+            "Right arrow: run one cycle\n"
+            "Left arrow: undo one cycle\n"
+            "Ctrl+O: open a circuit file\n"
+            "Ctrl+=: zoom in\n"
+            "Ctrl+-: zoom out\n"
+            "Ctrl+0: reset waveform view\n"
+            "Ctrl+Shift+T: switch light/dark mode\n"
+            "Ctrl+Shift+P: export waveform as PNG\n"
+            "Ctrl+Shift+E: export traces as CSV\n"
+            "Ctrl+1: show Available signals panel\n"
+            "Ctrl+2: show Simulation panel\n"
+            "Ctrl+3: show Switches panel\n"
+            "Ctrl+4: show Status panel\n"
+            "Delete: clear status messages\n"
+            "Ctrl+Q: exit",
+            "Keyboard Shortcuts", wx.ICON_INFORMATION | wx.OK)
+
+    def on_syntax_help(self, event):
+        """Show a short summary of the circuit file syntax."""
+        wx.MessageBox(
+            "Circuit files describe devices, connections, and monitors.\n\n"
+            "Typical sections define:\n"
+            "- devices such as switches, gates, clocks, and D-types\n"
+            "- connections between device outputs and inputs\n"
+            "- monitor signals to record and display\n\n"
+            "Signals inside modules are shown with collapsible module names in the GUI.\n"
+            "Use File > Open to load another circuit definition without restarting.",
+            "Circuit File Syntax", wx.ICON_INFORMATION | wx.OK)
+
+    def on_external_documentation(self, event):
+        """Open external documentation in the default browser."""
+        if wx.LaunchDefaultBrowser(EXTERNAL_DOCUMENTATION_URL):
+            self.set_status("Opened external documentation")
+        else:
+            self.show_status("Error: could not open external documentation.")
 
     def run_cycles(self, cycles):
         """Run the network for the requested number of cycles."""
@@ -957,18 +1049,64 @@ class Gui(wx.Frame):
 
         # Run one cycle at a time and record the monitored signals
         for _ in range(cycles):
+            simulation_snapshot = self.get_simulation_snapshot()
             if not self.network.execute_network():
+                self.restore_simulation_snapshot(simulation_snapshot)
                 self.show_status(
                     "Error: network failed to reach a steady state."
                 )
                 return False
 
             self.monitors.record_signals()
+            self.simulation_history.append(simulation_snapshot)
             self.cycles_completed += 1
             self.total_cycles_completed += 1
 
         self.update_cycles_completed_text()
         return True
+
+    def get_simulation_snapshot(self):
+        """Return a snapshot of the simulator state before one cycle runs."""
+        device_snapshots = []
+        for device in self.devices.devices_list:
+            device_snapshots.append({
+                "device_id": device.device_id,
+                "outputs": dict(device.outputs),
+                "clock_counter": device.clock_counter,
+                "switch_state": device.switch_state,
+                "dtype_memory": device.dtype_memory})
+
+        monitor_traces = {}
+        for monitor_name, monitor in self.monitors.monitors_dictionary.items():
+            monitor_traces[monitor_name] = list(monitor.trace)
+
+        return {
+            "devices": device_snapshots,
+            "monitor_traces": monitor_traces,
+            "cycles_completed": self.cycles_completed,
+            "total_cycles_completed": self.total_cycles_completed,
+            "cycle_offset": self.canvas.cycle_offset}
+
+    def restore_simulation_snapshot(self, simulation_snapshot):
+        """Restore a snapshot made by get_simulation_snapshot()."""
+        for device_snapshot in simulation_snapshot["devices"]:
+            device = self.devices.get_device(device_snapshot["device_id"])
+
+            if device is not None:
+                device.outputs = dict(device_snapshot["outputs"])
+                device.clock_counter = device_snapshot["clock_counter"]
+                device.switch_state = device_snapshot["switch_state"]
+                device.dtype_memory = device_snapshot["dtype_memory"]
+
+        for monitor_name, trace in simulation_snapshot["monitor_traces"].items():
+            monitor = self.monitors.monitors_dictionary.get(monitor_name)
+            if monitor is not None:
+                monitor.trace = list(trace)
+
+        self.cycles_completed = simulation_snapshot["cycles_completed"]
+        self.total_cycles_completed = simulation_snapshot["total_cycles_completed"]
+        self.canvas.cycle_offset = simulation_snapshot["cycle_offset"]
+        self.update_cycles_completed_text()
 
     def show_status(self, message):
         """Display a status message in the GUI."""
@@ -1015,6 +1153,29 @@ class Gui(wx.Frame):
             self.set_status(f"Ran {cycles} cycles")
             self.canvas.render()
 
+    def on_run_one_cycle(self, event):
+        """Run the simulation forward by one cycle."""
+        if not self.network.check_network():
+            self.show_status("Error: network is incomplete.")
+            return
+
+        if self.run_cycles(1):
+            self.show_status("Ran simulation for 1 cycle.")
+            self.set_status("Ran 1 cycle")
+            self.canvas.render()
+
+    def on_undo_cycle(self, event):
+        """Undo the most recent simulation cycle."""
+        if not self.simulation_history:
+            self.show_status("Error: no simulation cycle to undo.")
+            return
+
+        simulation_snapshot = self.simulation_history.pop()
+        self.restore_simulation_snapshot(simulation_snapshot)
+        self.update_switch_rows()
+        self.canvas.render()
+        self.show_status("Undid 1 cycle.")
+
     def on_reset_button(self, event):
         """Reset the simulation state and traces."""
         # Start again, but do not run any cycles yet
@@ -1022,6 +1183,7 @@ class Gui(wx.Frame):
         self.monitors.reset_monitors()
         self.cycles_completed = 0
         self.total_cycles_completed = 0
+        self.simulation_history = []
         self.canvas.cycle_offset = 0
         self.update_cycles_completed_text()
         self.canvas.reset_view()
@@ -1033,6 +1195,7 @@ class Gui(wx.Frame):
         # Only clear what is drawn - do not reset the circuit itself
         self.monitors.reset_monitors()
         self.cycles_completed = 0
+        self.simulation_history = []
         self.canvas.cycle_offset = self.total_cycles_completed
         self.update_cycles_completed_text()
         self.canvas.render()
@@ -1232,7 +1395,10 @@ class Gui(wx.Frame):
 
     def apply_theme_to_control(self, control):
         """Apply theme colours to a wx control."""
-        if isinstance(control, wx.Button):
+        if isinstance(control, wx.SpinCtrl):
+            control.SetBackgroundColour(self.theme["panel_bg"])
+            control.SetForegroundColour(self.theme["text"])
+        elif isinstance(control, wx.Button):
             control.SetBackgroundColour(self.theme["button_bg"])
             control.SetForegroundColour(self.theme["text"])
         elif isinstance(control, wx.TextCtrl):
@@ -1247,10 +1413,10 @@ class Gui(wx.Frame):
         control.Refresh()
 
     def apply_theme_to_text_box(self, text_box):
-        """Apply theme colours to a text box without line backgrounds."""
+        """Apply theme colours to existing and future text in a text box."""
         text_box.SetBackgroundColour(self.theme["status_bg"])
         text_box.SetForegroundColour(self.theme["status_text"])
-        text_style = wx.TextAttr(self.theme["status_text"])
+        text_style = wx.TextAttr(self.theme["status_text"], self.theme["status_bg"])
         text_box.SetDefaultStyle(text_style)
 
         last_position = text_box.GetLastPosition()
@@ -1275,9 +1441,18 @@ class Gui(wx.Frame):
     def set_collapsible_pane_colours(self, collapsible_pane):
         """Set colours for a native collapsible pane."""
         collapsible_pane.SetBackgroundColour(self.theme["panel_bg"])
-        collapsible_pane.SetForegroundColour(self.theme["text"])
+
+        # wx draws the collapsible header itself
+        # On Windows OS at least, the header seems to stay light even in dark mode so here the text is made dark as its is easier to read
+        # Need to test on more platforms to see if this is a general issue with wx or just a quirk of Windows
+        if self.theme_name == "dark" and wx.Platform == "__WXMSW__":
+            header_text_colour = wx.Colour(0, 0, 0)
+        else:
+            header_text_colour = self.theme["text"]
+
+        collapsible_pane.SetForegroundColour(header_text_colour)
         for child in collapsible_pane.GetChildren():
-            child.SetForegroundColour(self.theme["text"])
+            child.SetForegroundColour(header_text_colour)
             child.Refresh()
 
         collapsible_pane.Refresh()
@@ -1312,7 +1487,9 @@ class Gui(wx.Frame):
         parser = Parser(names, devices, network, monitors, scanner)
 
         if not parser.parse_network():
+            message = f"Could not load circuit file:\n{path}"
             self.show_status(f"Error: could not load {path}.")
+            wx.MessageBox(message, "Invalid circuit file", wx.ICON_ERROR | wx.OK)
             return False
 
         self.path = path
@@ -1323,6 +1500,7 @@ class Gui(wx.Frame):
         self.net_driver_dict = parser.net_driver_dict
         self.cycles_completed = 0
         self.total_cycles_completed = 0
+        self.simulation_history = []
         self.module_signal_expanded_paths = set()
 
         self.canvas.devices = devices
@@ -1512,6 +1690,9 @@ class Gui(wx.Frame):
         self.switch_state_buttons[high_button.GetId()] = (switch_name, 1, low_button, high_button, low_label,high_label)
 
         label.SetForegroundColour(self.theme["text"])
+        label_font = label.GetFont()
+        label_font.SetWeight(wx.FONTWEIGHT_BOLD)
+        label.SetFont(label_font)
         self.update_switch_state_buttons(low_button, high_button, low_label,high_label, device.switch_state)
 
         row_sizer.Add(label, 1, wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, 6)
@@ -1552,7 +1733,7 @@ class Gui(wx.Frame):
     def add_module_signal_group_rows(self, parent, parent_sizer, signal_group, parent_path):
         """Add nested module panes and signal rows to a sizer."""
         for signal_name, full_signal_name in sorted(signal_group.get("signals_at_this_level", [])):
-            self.add_available_signal_row(parent, parent_sizer, signal_name, full_signal_name, indent=18)
+            self.add_available_signal_row(parent, parent_sizer, signal_name, full_signal_name, indent=32)
 
         for module_name in sorted(signal_group):
             if module_name == "signals_at_this_level":
@@ -1691,6 +1872,7 @@ class Gui(wx.Frame):
         switch_was_set = self.devices.set_switch(switch_id, switch_value)
 
         if switch_was_set:
+            self.simulation_history = []
             if switch_value == 1:
                 switch_label = "HIGH"
             else:
@@ -1733,6 +1915,7 @@ class Gui(wx.Frame):
         scroll_x, scroll_y = self.module_signal_rows.GetViewStart()
 
         if self.monitors.remove_monitor(signal_name):
+            self.simulation_history = []
             self.show_status(f"Removed monitor for {signal_name}.")
         else:
             self.show_status(f"Error: {signal_name} is not monitored.")
@@ -1768,6 +1951,7 @@ class Gui(wx.Frame):
         # make_monitor returns an error code, so decode it if it fails or
         # confirm success if it works
         if error_type == self.monitors.NO_ERROR:
+            self.simulation_history = []
             self.show_status(f"Added monitor for {monitor_name}.")
             if refresh_available_signals:
                 self.update_module_signal_rows()
