@@ -59,9 +59,8 @@ from parse import Parser
 # - File upload so that different files can be tested without restarting the program
 # - panels are collapsible if user does not want them visible, e.g. the available signals panel can be very long and is not always needed
 # - Help menu with instructions on how to use the GUI and explanations of the different features, e.g. the mouse controls for panning and zooming the waveform display
-
-# ----- Features to add -----
 # - Slider that shows the value of all signals at a particular cycle that can be dragged back and forth to explore the history of the simulation
+# - Undo/redo buttons
 
 # ----- Features that were considered but ultimately not implemented -----
 # - Live tracing mode where the display updates in real time as the simulation runs, instead of only after the user clicks 'Run cycles'
@@ -888,10 +887,10 @@ class Gui(wx.Frame):
             theme_label = "Switch to dark mode\tctrl+shift+T"
 
         self.theme_menu_item = view_menu.Append(ID_TOGGLE_THEME, theme_label)
-        self.window_menu_items = {"available_signals": window_menu.Append(ID_SHOW_AVAILABLE_SIGNALS, "Show Available signals\tctrl+1"),
-                                  "simulation": window_menu.Append(ID_SHOW_SIMULATION, "Show Simulation\tctrl+2"),
-                                  "switches": window_menu.Append(ID_SHOW_SWITCHES, "Show Switches\tctrl+3"),
-                                  "console": window_menu.Append(ID_SHOW_CONSOLE, "Show Console\tctrl+4")}
+        self.window_menu_items = {"available_signals": window_menu.AppendCheckItem(ID_SHOW_AVAILABLE_SIGNALS, "Show Available signals\tctrl+1"),
+                                  "simulation": window_menu.AppendCheckItem(ID_SHOW_SIMULATION, "Show Simulation\tctrl+2"),
+                                  "switches": window_menu.AppendCheckItem(ID_SHOW_SWITCHES, "Show Switches\tctrl+3"),
+                                  "console": window_menu.AppendCheckItem(ID_SHOW_CONSOLE, "Show Console\tctrl+4")}
         
         menu_bar.Append(file_menu, "&File")
         menu_bar.Append(view_menu, "&View")
@@ -918,7 +917,9 @@ class Gui(wx.Frame):
         self.console_box.SetMinSize((-1, 90))
         self.clear_status_button = wx.Button(self, wx.ID_ANY, "Clear console")
         self.cycle_inspector_panel = wx.Panel(self, wx.ID_ANY)
-        self.cycle_inspector_label = wx.StaticText(self.cycle_inspector_panel, wx.ID_ANY, "Cycle: -")
+        self.cycle_inspector_label = wx.StaticText(self.cycle_inspector_panel, wx.ID_ANY, "Cycle:")
+        self.cycle_inspector_entry = wx.TextCtrl(self.cycle_inspector_panel, wx.ID_ANY, "-", style=wx.TE_PROCESS_ENTER)
+        self.cycle_inspector_entry.SetMinSize((70, -1))
         self.cycle_inspector_slider = wx.Slider(self.cycle_inspector_panel, wx.ID_ANY, 0, 0, 1, style=wx.SL_HORIZONTAL)
         self.cycle_inspector_panel.Hide()
         self.undo_button = wxbuttons.GenBitmapButton(self, wx.ID_ANY, wx.Bitmap(1, 1), size=(28, 28), style=wx.BORDER_NONE)
@@ -972,6 +973,8 @@ class Gui(wx.Frame):
         self.clear_traces_button.Bind(wx.EVT_BUTTON, self.on_clear_traces)
         self.clear_status_button.Bind(wx.EVT_BUTTON, self.on_clear_status)
         self.cycle_inspector_slider.Bind(wx.EVT_SLIDER, self.on_cycle_inspector_slider)
+        self.cycle_inspector_entry.Bind(wx.EVT_TEXT_ENTER, self.on_cycle_inspector_entry)
+        self.cycle_inspector_entry.Bind(wx.EVT_KILL_FOCUS, self.on_cycle_inspector_entry)
         self.undo_button.Bind(wx.EVT_BUTTON, self.on_undo_cycle)
         self.redo_button.Bind(wx.EVT_BUTTON, self.on_redo_cycle)
         self.toggle_theme_button.Bind(wx.EVT_BUTTON, self.on_toggle_theme)
@@ -1057,10 +1060,10 @@ class Gui(wx.Frame):
         console_sizer.Add(self.console_box, 1, wx.EXPAND | wx.ALL, 6)
 
         inspector_sizer = wx.BoxSizer(wx.HORIZONTAL)
-        inspector_sizer.Add(self.cycle_inspector_label, 0, wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, 8)
-        self.cycle_inspector_slider.SetMinSize((420, -1))
-        inspector_sizer.Add(self.cycle_inspector_slider, 0, wx.ALIGN_CENTER_VERTICAL)
-        inspector_sizer.AddStretchSpacer()
+        inspector_sizer.Add(self.cycle_inspector_label, 0, wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, 4)
+        inspector_sizer.Add(self.cycle_inspector_entry, 0, wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, 8)
+        self.cycle_inspector_slider.SetMinSize((120, -1))
+        inspector_sizer.Add(self.cycle_inspector_slider, 1, wx.EXPAND)
         self.cycle_inspector_panel.SetSizer(inspector_sizer)
         canvas_sizer.Add(self.canvas, 1, wx.EXPAND)
         canvas_sizer.Add(self.cycle_inspector_panel, 0, wx.EXPAND | wx.LEFT | wx.RIGHT | wx.BOTTOM, 5)
@@ -1278,7 +1281,9 @@ class Gui(wx.Frame):
             self.cycle_inspector_slider.SetRange(0, 1)
             self.cycle_inspector_slider.SetValue(0)
             self.cycle_inspector_slider.Enable(False)
-            self.cycle_inspector_label.SetLabel("Cycle: -")
+            self.cycle_inspector_entry.SetValue("-")
+            self.cycle_inspector_entry.Enable(False)
+            self.update_cycle_inspector_label_width()
             self.canvas.cycle_inspector_index = 0
             return
 
@@ -1293,13 +1298,27 @@ class Gui(wx.Frame):
             self.cycle_inspector_slider.SetRange(1, max_trace_length)
         self.cycle_inspector_slider.SetValue(self.cycle_index_to_slider_value(current_index))
         self.cycle_inspector_slider.Enable(True)
+        self.cycle_inspector_entry.Enable(True)
         self.canvas.cycle_inspector_index = current_index
         self.update_cycle_inspector_label()
 
     def update_cycle_inspector_label(self):
         """Show the real cycle number selected by the inspector."""
         selected_cycle = self.canvas.cycle_offset + self.canvas.cycle_inspector_index + 1
-        self.cycle_inspector_label.SetLabel(f"Cycle: {selected_cycle}")
+        if self.cycle_inspector_entry.GetValue() != str(selected_cycle):
+            self.cycle_inspector_entry.SetValue(str(selected_cycle))
+        self.update_cycle_inspector_label_width()
+
+    def update_cycle_inspector_label_width(self):
+        """Give the cycle inspector label enough room for its current text."""
+        if not hasattr(self.cycle_inspector_label, "GetTextExtent"):
+            return
+
+        text_width, _ = self.cycle_inspector_entry.GetTextExtent(self.cycle_inspector_entry.GetValue())
+        entry_width = max(text_width + 18, 70)
+        self.cycle_inspector_entry.SetMinSize((entry_width, -1))
+        if hasattr(self, "cycle_inspector_panel"):
+            self.cycle_inspector_panel.Layout()
 
     def cycle_index_to_slider_value(self, cycle_index):
         """Convert a trace list index into the matching slider value."""
@@ -1310,6 +1329,37 @@ class Gui(wx.Frame):
         if slider_value <= 1:
             return 0
         return slider_value - 1
+
+    def cycle_number_to_cycle_index(self, cycle_number):
+        """Convert a displayed cycle number into a trace list index."""
+        max_trace_length = self.get_max_trace_length()
+        if max_trace_length <= 0:
+            return 0
+
+        minimum_cycle = self.canvas.cycle_offset + 1
+        maximum_cycle = self.canvas.cycle_offset + max_trace_length
+        if cycle_number < minimum_cycle:
+            cycle_number = minimum_cycle
+        if cycle_number > maximum_cycle:
+            cycle_number = maximum_cycle
+
+        return cycle_number - self.canvas.cycle_offset - 1
+
+    def set_cycle_inspector_index(self, cycle_index):
+        """Set the inspected cycle and update the slider and entry."""
+        max_trace_length = self.get_max_trace_length()
+        if max_trace_length <= 0:
+            self.update_cycle_inspector_range()
+            return
+
+        if cycle_index < 0:
+            cycle_index = 0
+        if cycle_index >= max_trace_length:
+            cycle_index = max_trace_length - 1
+
+        self.canvas.cycle_inspector_index = cycle_index
+        self.cycle_inspector_slider.SetValue(self.cycle_index_to_slider_value(cycle_index))
+        self.update_cycle_inspector_label()
 
     def show_status(self, message):
         """Display a status message in the GUI."""
@@ -1465,9 +1515,24 @@ class Gui(wx.Frame):
     def on_cycle_inspector_slider(self, event):
         """Update the inspected cycle from the slider."""
         slider_value = self.cycle_inspector_slider.GetValue()
-        self.canvas.cycle_inspector_index = self.slider_value_to_cycle_index(slider_value)
-        self.update_cycle_inspector_label()
+        self.set_cycle_inspector_index(self.slider_value_to_cycle_index(slider_value))
         self.canvas.render()
+
+    def on_cycle_inspector_entry(self, event):
+        """Jump to the cycle typed into the cycle inspector."""
+        try:
+            cycle_number = int(self.cycle_inspector_entry.GetValue())
+            
+        except ValueError:
+            self.update_cycle_inspector_label()
+            if hasattr(event, "Skip"):
+                event.Skip()
+            return
+
+        self.set_cycle_inspector_index(self.cycle_number_to_cycle_index(cycle_number))
+        self.canvas.render()
+        if hasattr(event, "Skip"):
+            event.Skip()
 
     def on_toggle_theme(self, event):
         """Switch between light and dark mode."""
@@ -1487,7 +1552,7 @@ class Gui(wx.Frame):
         self.Layout()
 
     def on_show_section(self, event):
-        """Show one hidden side panel section from the Window menu."""
+        """Show or hide one side panel section from the Window menu."""
         menu_id = event.GetId()
         if menu_id == ID_SHOW_AVAILABLE_SIGNALS:
             section_name = "available_signals"
@@ -1498,9 +1563,7 @@ class Gui(wx.Frame):
         else:
             section_name = "console"
 
-        self.section_panels[section_name].Show()
-        self.section_close_buttons[section_name].SetLabel("X")
-        self.section_close_buttons[section_name].Refresh()
+        self.section_panels[section_name].Show(event.IsChecked())
         self.update_section_window_menu()
         self.Layout()
 
@@ -1580,9 +1643,9 @@ class Gui(wx.Frame):
         return panel, body_sizer
 
     def update_section_window_menu(self):
-        """Enable Window menu items only for hidden sections."""
+        """Tick Window menu items for panels that are visible."""
         for section_name, menu_item in self.window_menu_items.items():
-            menu_item.Enable(not self.section_panels[section_name].IsShown())
+            menu_item.Check(self.section_panels[section_name].IsShown())
 
     def get_system_theme_name(self):
         """Return the OS light/dark appearance when wx exposes it."""
@@ -1637,6 +1700,7 @@ class Gui(wx.Frame):
                            self.clear_status_button,
                            self.cycle_inspector_panel,
                            self.cycle_inspector_label,
+                           self.cycle_inspector_entry,
                            self.cycle_inspector_slider,
                            self.switch_rows,
                            self.module_signal_rows,
@@ -2126,7 +2190,11 @@ class Gui(wx.Frame):
                 collapsible_pane.Collapse(False)
 
             collapsible_pane.Bind(wx.EVT_COLLAPSIBLEPANE_CHANGED, self.on_module_signal_pane_changed)
-            parent_sizer.Add(collapsible_pane, 0, wx.EXPAND | wx.ALL, 4)
+            pane_row_sizer = wx.BoxSizer(wx.HORIZONTAL)
+            if parent_path:
+                pane_row_sizer.AddSpacer(24)
+            pane_row_sizer.Add(collapsible_pane, 1, wx.EXPAND)
+            parent_sizer.Add(pane_row_sizer, 0, wx.EXPAND | wx.ALL, 4)
 
     def store_module_signal_pane_state(self):
         """Remember which module panes are expanded before rebuilding."""
@@ -2145,6 +2213,7 @@ class Gui(wx.Frame):
         # row always has one button
         # Its label and handler are set by update_available_signal_button() depending on whether the signal is already monitored
         action_button = wx.Button(parent, wx.ID_ANY, "")
+        action_button.SetMinSize((72, 26))
         self.module_signal_button_names[action_button.GetId()] = signal_name
         self.module_signal_action_buttons[signal_name] = action_button
         self.update_available_signal_button(action_button, signal_name)
