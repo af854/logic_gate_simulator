@@ -1,0 +1,85 @@
+MODULE XOR2
+    INPUTS A, B;
+    OUTPUTS Y;
+
+    DEVICES
+        XOR X;
+
+    CONNECT
+        X.I1 = A;
+        X.I2 = B;
+        Y = X;
+ENDMODULE;
+
+
+MODULE XOR4
+    INPUTS A0, A1, A2, A3;
+    OUTPUTS Y;
+
+    DEVICES
+        XOR2 L, R, O;
+
+    CONNECT
+        L.A = A0;
+        L.B = A1;
+
+        R.A = A2;
+        R.B = A3;
+
+        O.A = L.Y;
+        O.B = R.Y;
+
+        Y = O.Y;
+ENDMODULE;
+
+
+MODULE XOR8
+    INPUTS A0, A1, A2, A3, A4, A5, A6, A7;
+    OUTPUTS Y;
+
+    DEVICES
+        XOR4 L, R;
+        XOR2 O;
+
+    CONNECT
+        L.A0 = A0;
+        L.A1 = A1;
+        L.A2 = A2;
+        L.A3 = A3;
+
+        R.A0 = A4;
+        R.A1 = A5;
+        R.A2 = A6;
+        R.A3 = A7;
+
+        O.A = L.Y;
+        O.B = R.Y;
+
+        Y = O.Y;
+ENDMODULE;
+
+
+DEVICES
+    SWITCH(0) I0, I1, I2, I3, I4, I5, I6, I7;
+    XOR8 P;
+
+CONNECT
+    P.A0 = I0;
+    P.A1 = I1;
+    P.A2 = I2;
+    P.A3 = I3;
+    P.A4 = I4;
+    P.A5 = I5;
+    P.A6 = I6;
+    P.A7 = I7;
+
+MONITOR
+    I7,
+    I6,
+    I5,
+    I4,
+    I3,
+    I2,
+    I1,
+    I0,
+    P.Y;

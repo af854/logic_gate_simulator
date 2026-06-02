@@ -1,0 +1,295 @@
+(*
+ *  An example circuit definition file using relevant modules to
+ *  build a very simple traffic light controller 
+ *  using a simple two-state FSM, 
+ *  2-bit counter, and 2-bit subtractor module. 
+ *  
+ *  It demonstrates usage of the language's feature set
+ *  and all supported primitive devices. 
+ *  
+ *  Behaviour: 
+ *      when ENABLE=1, the circuit should run, making
+ *      the output GREEN on for 4 cycles, then RED on for 2 cycles,
+ *      indefinitely. The LEFT1 and LEFT0 outputs monitors display
+ *      the 2-bit value of the amount of time left in each stage.
+ * 
+ *      When ENABLE=0, the circuit holds its current state.
+ *)
+
+##################################################
+# BASIC MODULES 
+##################################################
+
+(* Not gate using a NAND gate *)
+MODULE NOT_GATE
+    INPUTS
+        IN;
+    OUTPUTS
+        OUT;
+    DEVICES
+        NAND(2) N;
+    CONNECT
+        N.I1 = IN;
+        N.I2 = IN;
+        OUT = N;
+ENDMODULE;
+
+(* 2-to-1 MUX: Y = SEL ? B : A *)
+MODULE MUX2
+    INPUTS
+        SEL, A, B;
+
+    OUTPUTS
+        Y;
+
+    DEVICES
+        NOT_GATE NOT_SEL;
+        AND(2) A_PATH, B_PATH;
+        OR(2) O1;
+
+    CONNECT
+        NOT_SEL.IN = SEL;
+
+        A_PATH.I1 = A;
+        A_PATH.I2 = NOT_SEL.OUT;
+
+        B_PATH.I1 = B;
+        B_PATH.I2 = SEL;
+
+        O1.I1 = A_PATH;
+        O1.I2 = B_PATH;
+        Y = O1;
+ENDMODULE;
+
+(* 1-Bit Half Adder *) 
+MODULE HALF_ADDER
+    INPUTS
+        A, B;
+
+    OUTPUTS
+        SUM, CARRY;
+
+    DEVICES
+        XOR X;
+        AND(2) A1;
+
+    CONNECT
+        X.I1 = A;
+        X.I2 = B;
+        SUM = X;
+
+        A1.I1 = A;
+        A1.I2 = B;
+        CARRY = A1;
+
+ENDMODULE;
+
+(* 1-Bit Full Adder *) 
+MODULE FULL_ADDER
+    INPUTS
+        A, B, CIN;
+
+    OUTPUTS
+        SUM, COUT;
+
+    DEVICES
+        HALF_ADDER H1, H2;
+        OR(2) O1;
+
+    CONNECT
+        H1.A = A;
+        H1.B = B;
+
+        H2.A = H1.SUM;
+        H2.B = CIN;
+
+        O1.I1 = H1.CARRY;
+        O1.I2 = H2.CARRY;
+
+        SUM = H2.SUM;
+        COUT = O1;
+
+ENDMODULE;
+
+##################################################
+# MODULES FOR COUNTDOWN 
+##################################################
+
+(* 
+    2-bit subtractor module using 2 full-adders
+    Inputs:
+        - A1 A0 and B1 B0, to compute A-B0
+    Outputs:
+        - S1 S0 (the result)
+        - VALID (1 if no underflow occured, 0 otherwise)
+    
+    Computes A-B by performing A + Bitwise NOT (B) + 1
+*)
+MODULE SUBTRACTOR_2BIT
+    INPUTS
+        A0, A1, B0, B1;
+
+    OUTPUTS
+        S0, S1, VALID;
+
+    DEVICES
+        NOT_GATE NOT_B0, NOT_B1;
+        FULL_ADDER F0, F1;
+
+    CONNECT
+        NOT_B0.IN = B0;
+        NOT_B1.IN = B1;
+
+        F0.A = A0;
+        F0.B = NOT_B0.OUT;
+        F0.CIN = 1;
+
+        F1.A = A1;
+        F1.B = NOT_B1.OUT;
+        F1.CIN = F0.COUT;
+
+        S0 = F0.SUM;
+        S1 = F1.SUM;
+        VALID = F1.COUT;
+
+ENDMODULE;
+
+
+(* 
+    A countdown timer
+    Inputs: 
+        - CLK: the clock used for counting
+        - LOAD: set to 1 to load a new value
+        - LOAD1 and LOAD0: 2-bit value to be loaded
+    Outputs:
+        - Q1 Q0: 2-bit value of the current count
+        - EXPIRED: 1 if count is 0 else 0 
+
+ *)
+MODULE COUNTDOWN_2BIT
+    INPUTS
+        CLK, LOAD;
+        LOAD0, LOAD1;
+
+    OUTPUTS
+        Q1, Q0, EXPIRED;
+
+    DEVICES
+        DTYPE R0, R1;
+        SUBTRACTOR_2BIT DEC;
+        MUX2 M0, M1;
+        NOR(2) ZERO;
+
+    CONNECT
+        # Calculate expired signal: should be R1.Q NOR R0.Q
+        ZERO.I1 = R0.Q;
+        ZERO.I2 = R1.Q;
+        EXPIRED = ZERO;
+
+        # Input to the subtractor module
+        DEC.A1 = R1.Q;
+        DEC.A0 = R0.Q;
+        DEC.B1 = 0;
+        DEC.B0 = 1;
+
+        # MUX between output of subtractor or load value 
+        M0.SEL = LOAD;
+        M0.A = DEC.S0;
+        M0.B = LOAD0;
+
+        M1.SEL = LOAD;
+        M1.A = DEC.S1;
+        M1.B = LOAD1;
+
+        # D-Types to store count
+        R0.CLK = CLK;
+        R0.DATA = M0.Y;
+        R0.SET = 0;
+        R0.CLEAR = 0;
+
+        R1.CLK = CLK;
+        R1.DATA = M1.Y;
+        R1.SET = 0;
+        R1.CLEAR = 0;
+
+        # Assign outputs
+        Q0 = R0.Q;
+        Q1 = R1.Q;
+
+ENDMODULE;
+
+##################################################
+# FULL CONTROLLER
+##################################################
+
+MODULE RED_GREEN_FSM
+    INPUTS
+        CLK;
+
+    OUTPUTS
+        GREEN, RED;
+        LEFT0, LEFT1;
+
+    DEVICES
+        DTYPE STATE; # 1-bit state register
+        MUX2 STATE_MUX;
+        COUNTDOWN_2BIT TIMER;
+
+    CONNECT
+        # STATE=1: RED, STATE=0: GREEN
+        GREEN = STATE.QBAR;
+        RED = STATE.Q;
+
+        # Toggle the state when the timer is expired
+        STATE_MUX.SEL = TIMER.EXPIRED;
+        STATE_MUX.A = STATE.Q;
+        STATE_MUX.B = STATE.QBAR;
+
+        STATE.CLK = CLK;
+        STATE.DATA = STATE_MUX.Y;
+        STATE.SET = 0;
+        STATE.CLEAR = 0;
+
+        # Load the timer with new value when expired
+        # Load 11 when currently RED (next GREEN)
+        # Load 01 when currently GREEN (next RED)
+        TIMER.CLK = CLK;
+        TIMER.LOAD = TIMER.EXPIRED;
+        TIMER.LOAD0 = 1;
+        TIMER.LOAD1 = STATE.Q;
+
+        # Output the amount of time left
+        LEFT0 = TIMER.Q0;
+        LEFT1 = TIMER.Q1;
+ENDMODULE;
+
+
+##################################################
+# TOP-LEVEL CIRCUIT 
+##################################################
+
+
+DEVICES
+    CLOCK(1) CLK;
+    SWITCH(1) EN;
+
+    MUX2 CLK_GATE;
+    RED_GREEN_FSM TL_CTRL;
+
+NETS
+    GCLK;  # Gated clock based on enable switch 
+
+CONNECT
+    # Clock gate MUX 
+    CLK_GATE.SEL = EN;
+    CLK_GATE.A = 0;
+    CLK_GATE.B = CLK;
+    GCLK = CLK_GATE.Y;
+
+    # Pass gated clock to the FSM
+    TL_CTRL.CLK = GCLK;
+
+MONITOR
+    CLK, EN, GCLK;
+    TL_CTRL.GREEN, TL_CTRL.RED;
+    TL_CTRL.LEFT1, TL_CTRL.LEFT0;
