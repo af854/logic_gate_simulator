@@ -171,6 +171,14 @@ class UserInterface:
             port_id = None
         return [device_id, port_id]
 
+    def get_signal_name_from_ids(self, device_id, port_id):
+        """Return the signal name string from device and port IDs."""
+        signal_name = self.names.get_name_string(device_id)
+        if port_id is not None:
+            signal_name += "." + self.names.get_name_string(port_id)
+        return signal_name
+
+
     def read_number(self, lower_bound, upper_bound):
         """Return the current number.
 
@@ -226,8 +234,13 @@ class UserInterface:
         monitor = self.read_signal_name()
         if monitor is not None:
             [device, port] = monitor
-            monitor_error = self.monitors.make_monitor(device, port,
-                                                       self.cycles_completed)
+            requested_name = self.get_signal_name_from_ids(device, port)
+            monitor_error = self.monitors.make_monitor(
+                device,
+                port,
+                requested_name=requested_name,
+                cycles_completed=self.cycles_completed,
+            )
             if monitor_error == self.monitors.NO_ERROR:
                 print("Successfully made monitor.")
             else:
@@ -238,7 +251,8 @@ class UserInterface:
         monitor = self.read_signal_name()
         if monitor is not None:
             [device, port] = monitor
-            if self.monitors.remove_monitor(device, port):
+            requested_name = self.get_signal_name_from_ids(device, port)
+            if self.monitors.remove_monitor(requested_name):
                 print("Successfully zapped monitor")
             else:
                 print("Error! Could not zap monitor.")
