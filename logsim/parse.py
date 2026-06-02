@@ -2946,11 +2946,25 @@ class Parser:
                 if connection_error_type == self.network.FIRST_DEVICE_ABSENT:
                     best_error_symbol = input_signal.main_symbol
                 elif connection_error_type == self.network.FIRST_PORT_ABSENT:
-                    best_error_symbol = input_signal.port_symbol
+                    if input_signal.port_symbol is None:
+                        error_message = (
+                            "Input port not specified on device with multiple input ports."
+                        )
+                        best_error_symbol = input_signal.main_symbol
+                    else:
+                        best_error_symbol = input_signal.port_symbol
+
                 elif connection_error_type == self.network.SECOND_DEVICE_ABSENT:
                     best_error_symbol = output_signal.main_symbol
+
                 elif connection_error_type == self.network.SECOND_PORT_ABSENT:
-                    best_error_symbol = output_signal.port_symbol
+                    if output_signal.port_symbol is None:
+                        error_message = (
+                            "Output port not specified on device with multiple output ports."
+                        )
+                        best_error_symbol = output_signal.main_symbol
+                    else:
+                        best_error_symbol = output_signal.port_symbol
                 elif (
                     connection_error_type == self.network.INPUT_CONNECTED
                     or connection_error_type == self.network.OUTPUT_TO_OUTPUT
@@ -3281,11 +3295,25 @@ class Parser:
 
                 return False
 
+        except MemoryError:
+            print("---------------------------------------------------------------")
+            print("Error: The circuit is too large to fit in available memory.")
+            print(
+                "This may be caused by too many devices,"
+                "or module instantiations\nthat expand into a very large circuit."
+            )
+            print()
+            print("*** ERROR: Parsing stopped because the computer ran out of memory. ***\n")
+            print(
+                "Network not built. Simulation will not start until the definition "
+                "file is simplified."
+            )
+            return False
+
         except Exception:
             # FALLBACK ERROR MESSAGE - This should hopefully not ever be seen by the user!
             print("---------------------------------------------------------------")
             try:
-                self.error_count += 1
                 self.error(
                     "An unexpected error occurred - "
                     "please check the definition file")
