@@ -1,0 +1,147 @@
+MODULE NOT_GATE
+    INPUTS
+        IN;
+    OUTPUTS
+        OUT;
+    DEVICES
+        NAND(2) N;
+    CONNECT
+        N.I1 = IN;
+        N.I2 = IN;
+        OUT = N;
+ENDMODULE;
+
+MODULE MUX2
+    INPUTS
+        SEL, A, B;
+    OUTPUTS
+        Y;
+    DEVICES
+        NOT_GATE N;
+        AND(2) A1, A2;
+        OR(2) O;
+    CONNECT
+        N.IN = SEL;
+        A1.I1 = A; A1.I2 = N.OUT;
+        A2.I1 = B; A2.I2 = SEL;
+        O.I1 = A1; O.I2 = A2;
+        Y = O;
+ENDMODULE;
+
+MODULE DUAL_EDGE_FLOP
+    INPUTS
+        CLK, DATA, SET, CLEAR;
+    OUTPUTS
+        Q, QBAR;
+    DEVICES
+        DTYPE D_RISE, D_FALL;
+        NOT_GATE NOT_CLK, NOT_Q;
+        MUX2 OUT_MUX;
+    CONNECT
+        D_RISE.CLK = CLK;
+        D_RISE.DATA = DATA;
+        D_RISE.SET = SET;
+        D_RISE.CLEAR = CLEAR;
+
+        NOT_CLK.IN = CLK;
+        D_FALL.CLK = NOT_CLK.OUT;
+        D_FALL.DATA = DATA;
+        D_FALL.SET = SET;
+        D_FALL.CLEAR = CLEAR;
+
+        OUT_MUX.SEL = CLK;
+        OUT_MUX.A = D_FALL.Q;
+        OUT_MUX.B = D_RISE.Q;
+
+        Q = OUT_MUX.Y;
+        NOT_Q.IN = OUT_MUX.Y;
+        QBAR = NOT_Q.OUT;
+ENDMODULE;
+
+MODULE RING_10
+    INPUTS
+        CLK, RESET;
+    OUTPUTS
+        O0, O1, O2, O3, O4, O5, O6, O7, O8, O9, CARRY;
+    DEVICES
+        DUAL_EDGE_FLOP D0, D1, D2, D3, D4, D5, D6, D7, D8, D9;
+    CONNECT
+        D0.SET = RESET; D0.CLEAR = 0;
+        D1.SET = 0;     D1.CLEAR = RESET;
+        D2.SET = 0;     D2.CLEAR = RESET;
+        D3.SET = 0;     D3.CLEAR = RESET;
+        D4.SET = 0;     D4.CLEAR = RESET;
+        D5.SET = 0;     D5.CLEAR = RESET;
+        D6.SET = 0;     D6.CLEAR = RESET;
+        D7.SET = 0;     D7.CLEAR = RESET;
+        D8.SET = 0;     D8.CLEAR = RESET;
+        D9.SET = 0;     D9.CLEAR = RESET;
+
+        D0.CLK = CLK; D0.DATA = D9.Q;
+        D1.CLK = CLK; D1.DATA = D0.Q;
+        D2.CLK = CLK; D2.DATA = D1.Q;
+        D3.CLK = CLK; D3.DATA = D2.Q;
+        D4.CLK = CLK; D4.DATA = D3.Q;
+        D5.CLK = CLK; D5.DATA = D4.Q;
+        D6.CLK = CLK; D6.DATA = D5.Q;
+        D7.CLK = CLK; D7.DATA = D6.Q;
+        D8.CLK = CLK; D8.DATA = D7.Q;
+        D9.CLK = CLK; D9.DATA = D8.Q;
+
+        O0 = D0.Q; O1 = D1.Q; O2 = D2.Q; O3 = D3.Q; O4 = D4.Q;
+        O5 = D5.Q; O6 = D6.Q; O7 = D7.Q; O8 = D8.Q; O9 = D9.Q;
+
+        CARRY = D9.QBAR;
+ENDMODULE;
+
+MODULE RING_6
+    INPUTS
+        CLK, RESET;
+    OUTPUTS
+        T0, T10, T20, T30, T40, T50;
+    DEVICES
+        DTYPE D0, D1, D2, D3, D4, D5;
+    CONNECT
+        D0.SET = RESET; D0.CLEAR = 0;
+        D1.SET = 0;     D1.CLEAR = RESET;
+        D2.SET = 0;     D2.CLEAR = RESET;
+        D3.SET = 0;     D3.CLEAR = RESET;
+        D4.SET = 0;     D4.CLEAR = RESET;
+        D5.SET = 0;     D5.CLEAR = RESET;
+
+        D0.CLK = CLK; D0.DATA = D5.Q;
+        D1.CLK = CLK; D1.DATA = D0.Q;
+        D2.CLK = CLK; D2.DATA = D1.Q;
+        D3.CLK = CLK; D3.DATA = D2.Q;
+        D4.CLK = CLK; D4.DATA = D3.Q;
+        D5.CLK = CLK; D5.DATA = D4.Q;
+
+        T0 = D0.Q; T10 = D1.Q; T20 = D2.Q;
+        T30 = D3.Q; T40 = D4.Q; T50 = D5.Q;
+ENDMODULE;
+
+DEVICES
+    CLOCK(1) SYS_CLK;
+    SWITCH(0) SW_RUN;
+
+    NOT_GATE INVERT_RUN;
+
+    RING_10 ONES;
+    RING_6 TENS;
+
+CONNECT
+    INVERT_RUN.IN = SW_RUN;
+
+    ONES.CLK = SYS_CLK;
+    ONES.RESET = INVERT_RUN.OUT;
+
+    TENS.CLK = ONES.CARRY;
+    TENS.RESET = INVERT_RUN.OUT;
+
+MONITOR
+    SYS_CLK, SW_RUN;
+
+    TENS.T50, TENS.T40, TENS.T30, TENS.T20, TENS.T10, TENS.T0;
+
+    ONES.O9, ONES.O8, ONES.O7, ONES.O6, ONES.O5,
+    ONES.O4, ONES.O3, ONES.O2, ONES.O1, ONES.O0;
