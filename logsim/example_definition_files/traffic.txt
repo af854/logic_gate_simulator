@@ -176,7 +176,7 @@ MODULE COUNTDOWN_2BIT
 
     DEVICES
         DTYPE R0, R1;
-        SUBTRACTOR_2BIT DEC;
+        SUBTRACTOR_2BIT SUB;
         MUX2 M0, M1;
         NOR(2) ZERO;
 
@@ -187,18 +187,18 @@ MODULE COUNTDOWN_2BIT
         EXPIRED = ZERO;
 
         # Input to the subtractor module
-        DEC.A1 = R1.Q;
-        DEC.A0 = R0.Q;
-        DEC.B1 = 0;
-        DEC.B0 = 1;
+        SUB.A1 = R1.Q;
+        SUB.A0 = R0.Q;
+        SUB.B1 = 0;
+        SUB.B0 = 1;
 
         # MUX between output of subtractor or load value 
         M0.SEL = LOAD;
-        M0.A = DEC.S0;
+        M0.A = SUB.S0;
         M0.B = LOAD0;
 
         M1.SEL = LOAD;
-        M1.A = DEC.S1;
+        M1.A = SUB.S1;
         M1.B = LOAD1;
 
         # D-Types to store count
@@ -222,6 +222,17 @@ ENDMODULE;
 # FULL CONTROLLER
 ##################################################
 
+(* 
+    Full FSM for the traffic light controller 
+    Inputs: 
+        - CLK
+    Outputs:
+        - GREEN and RED signals
+        - LEFT1 LEFT0: 2-bit value of time left
+    
+    Uses 1-bit STATE flip-flop to store the current
+    light colour (STATE=1 -> red, STATE=0 -> green)
+ *)
 MODULE RED_GREEN_FSM
     INPUTS
         CLK;
@@ -268,7 +279,12 @@ ENDMODULE;
 # TOP-LEVEL CIRCUIT 
 ##################################################
 
-
+(*
+    Top-level circuit
+    Instantiates the FSM traffic light controller
+    Also uses a mux to gate the clock using the EN
+    input.
+*)
 DEVICES
     CLOCK(1) CLK;
     SWITCH(1) EN;
