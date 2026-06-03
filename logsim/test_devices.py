@@ -81,10 +81,14 @@ def test_make_device(new_devices):
     # Clock could be anywhere in its cycle
     assert clock_device.outputs in [{None: new_devices.LOW}, {None: new_devices.HIGH}]
 
-    assert dtype_device.outputs == {
-        new_devices.Q_ID: new_devices.LOW,
-        new_devices.QBAR_ID: new_devices.HIGH,
-    }
+    assert dtype_device.outputs[new_devices.Q_ID] == dtype_device.dtype_memory
+
+    expected_qbar = (
+        new_devices.LOW
+        if dtype_device.dtype_memory == new_devices.HIGH
+        else new_devices.HIGH
+    )
+    assert dtype_device.outputs[new_devices.QBAR_ID] == expected_qbar
 
     assert clock_device.clock_half_period == 5
     # Clock counter and D-type memory are initially at random states
