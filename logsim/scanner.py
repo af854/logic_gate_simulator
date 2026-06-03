@@ -1,12 +1,7 @@
-"""Read the circuit definition file and translate the characters into symbols.
+"""Read circuit definition files and translate characters into symbols.
 
-Used in the Logic Simulator project to read the characters in the definition
-file and translate them into symbols that are usable by the parser.
-
-Classes
--------
-Scanner - reads definition file and translates characters into symbols.
-Symbol - encapsulates a symbol and stores its properties.
+This module is used by the Logic Simulator project to tokenise the definition
+file and provide symbols that the parser can consume.
 """
 
 import bisect
@@ -17,22 +12,39 @@ import sys
 class Symbol:
     """Encapsulate a symbol and store its properties.
 
+    A symbol comprises a token category, a unique identifier and the source
+    location at which the token was recognised.
+
     Parameters
     ----------
     symbol_type : int, optional
-        The integer representing the token category (e.g., NAME, NUMBER).
+        The integer representing the token category, such as NAME or NUMBER.
     symbol_id : int, optional
-        The unique integer ID from the Names class, or the numerical value.
+        The unique integer identifier assigned by the Names class, or the
+        numerical value for a NUMBER symbol.
     line_num : int, optional
-        The line index in the definition file where the symbol begins.
+        The index of the line in the definition file where the symbol begins.
     line_pos : int, optional
-        The column index in the definition file where the symbol begins.
+        The column index within the line where the symbol begins.
     """
 
     __slots__ = ["type", "id", "line_num", "line_pos"]
 
     def __init__(self, symbol_type=None, symbol_id=None, line_num=None, line_pos=None):
-        """Initialise symbol properties."""
+        """Initialise symbol properties.
+
+        Parameters
+        ----------
+        symbol_type : int, optional
+            The integer representing the token category, such as NAME or NUMBER.
+        symbol_id : int, optional
+            The unique integer identifier assigned by the Names class, or the
+            numerical value for a NUMBER symbol.
+        line_num : int, optional
+            The index of the line in the definition file where the symbol begins.
+        line_pos : int, optional
+            The column index within the line where the symbol begins.
+        """
         self.type = symbol_type
         self.id = symbol_id
         self.line_num = line_num
@@ -40,7 +52,11 @@ class Symbol:
 
 
 class Scanner:
-    """Read circuit definition file and translate the characters into symbols.
+    """Read a circuit definition file and translate characters into symbols.
+
+    The scanner converts source text into a sequence of Symbol instances.
+    It recognises comments, whitespace, numbers, identifiers, punctuation and
+    unknown characters.
 
     Parameters
     ----------
@@ -58,7 +74,15 @@ class Scanner:
     """
 
     def __init__(self, path, names):
-        """Open specified file and initialise reserved words and IDs."""
+        """Open the specified file and initialise reserved words and token IDs.
+
+        Parameters
+        ----------
+        path : str
+            Path to the circuit definition file.
+        names : Names
+            Instance of the Names class for mapping string tokens to integer IDs.
+        """
         self.names = names
 
         (
@@ -72,7 +96,7 @@ class Scanner:
             self.NUMBER,
             self.NAME,
             self.EOF,
-            self.UNKNOWN
+            self.UNKNOWN,
         ) = range(11)
 
         self.punct_map = {
@@ -137,6 +161,10 @@ class Scanner:
     def get_symbol(self):
         """Translate the next sequence of characters into a symbol.
 
+        The scanner advances through the input text and returns the next token.
+        It skips whitespace and comments and categorises names as either
+        keywords or identifiers.
+
         Returns
         -------
         Symbol
@@ -156,7 +184,6 @@ class Scanner:
 
             if group in ("WHITESPACE", "COMMENT"):
                 continue
-
 
             start_index = match.start()
             line_num = bisect.bisect_right(self.line_starts, start_index) - 1
@@ -188,9 +215,9 @@ class Scanner:
         Parameters
         ----------
         line_num : int
-            The index of the line containing the error.
+            The zero-based index of the line containing the error.
         line_pos : int
-            The column index where the error occurred.
+            The zero-based column index where the error occurred.
         """
         if 0 <= line_num < len(self.lines):
             line = self.lines[line_num]
