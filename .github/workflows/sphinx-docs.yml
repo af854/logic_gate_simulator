@@ -23,7 +23,10 @@ jobs:
 
       - name: Install dependencies
         run: pip install -r requirements.txt
-
+      - name: Install Linux dependencies for wxPython
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libnotify4 libgtk-3-0 libsdl2-2.0-0
       - name: Install gui dependencies
         run: |
           pip install sphinx
