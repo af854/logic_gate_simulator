@@ -147,6 +147,7 @@ SIMULATION_CONTROL_WIDTH = 140
 COMMAND_BUTTON_HEIGHT = 24
 CYCLES_COMPLETED_WIDTH = 140
 CYCLE_INSPECTOR_ENTRY_WIDTH = 90
+CYCLE_INSPECTOR_ENTRY_HEIGHT = 22
 LIVE_TRACE_BUTTON_SIZE = 28
 LIVE_TRACE_SPEED_BUTTON_WIDTH = 30
 CYCLE_SPIN_WIDTH = 88
@@ -1232,9 +1233,15 @@ class Gui(wx.Frame):
         self.cycle_inspector_entry = wx.TextCtrl(
             self.cycle_inspector_panel, wx.ID_ANY, "-", style=wx.TE_PROCESS_ENTER
         )
-        self.cycle_inspector_entry.SetMinSize((CYCLE_INSPECTOR_ENTRY_WIDTH, -1))
-        self.cycle_inspector_entry.SetMaxSize((CYCLE_INSPECTOR_ENTRY_WIDTH, -1))
-        self.cycle_inspector_entry.SetInitialSize((CYCLE_INSPECTOR_ENTRY_WIDTH, -1))
+        self.cycle_inspector_entry.SetMinSize(
+            (CYCLE_INSPECTOR_ENTRY_WIDTH, CYCLE_INSPECTOR_ENTRY_HEIGHT)
+        )
+        self.cycle_inspector_entry.SetMaxSize(
+            (CYCLE_INSPECTOR_ENTRY_WIDTH, CYCLE_INSPECTOR_ENTRY_HEIGHT)
+        )
+        self.cycle_inspector_entry.SetInitialSize(
+            (CYCLE_INSPECTOR_ENTRY_WIDTH, CYCLE_INSPECTOR_ENTRY_HEIGHT)
+        )
         self.cycle_inspector_slider = wx.Slider(
             self.cycle_inspector_panel, wx.ID_ANY, 0, 0, 1, style=wx.SL_HORIZONTAL
         )
@@ -1742,11 +1749,17 @@ class Gui(wx.Frame):
         ):
             return
 
-        self.cycle_inspector_entry.SetMinSize((CYCLE_INSPECTOR_ENTRY_WIDTH, -1))
+        self.cycle_inspector_entry.SetMinSize(
+            (CYCLE_INSPECTOR_ENTRY_WIDTH, CYCLE_INSPECTOR_ENTRY_HEIGHT)
+        )
         if hasattr(self.cycle_inspector_entry, "SetMaxSize"):
-            self.cycle_inspector_entry.SetMaxSize((CYCLE_INSPECTOR_ENTRY_WIDTH, -1))
+            self.cycle_inspector_entry.SetMaxSize(
+                (CYCLE_INSPECTOR_ENTRY_WIDTH, CYCLE_INSPECTOR_ENTRY_HEIGHT)
+            )
         if hasattr(self.cycle_inspector_entry, "SetInitialSize"):
-            self.cycle_inspector_entry.SetInitialSize((CYCLE_INSPECTOR_ENTRY_WIDTH, -1))
+            self.cycle_inspector_entry.SetInitialSize(
+                (CYCLE_INSPECTOR_ENTRY_WIDTH, CYCLE_INSPECTOR_ENTRY_HEIGHT)
+            )
         if hasattr(self, "cycle_inspector_panel"):
             self.cycle_inspector_panel.Layout()
 
