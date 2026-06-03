@@ -1,0 +1,41 @@
+(* Module Instantiations *)
+MODULE DIVIDE_BY_2
+    INPUTS 
+        IN;
+    OUTPUTS 
+        OUT;
+    DEVICES
+        DTYPE FF;
+    CONNECT
+        FF.DATA = FF.QBAR;
+        FF.CLK = IN;
+        FF.SET = 0;  # Literal 0
+        FF.CLEAR = 0;
+        OUT = FF.Q;
+ENDMODULE;
+
+MODULE DIVIDE_BY_4
+    INPUTS 
+        IN;
+    OUTPUTS 
+        OUT;
+    DEVICES
+        DIVIDE_BY_2 DIV2_0, DIV2_1;
+        CONNECT
+        DIV2_0.IN = IN;
+        DIV2_1.IN = DIV2_0.OUT;
+        OUT = DIV2_1.OUT;
+ENDMODULE;
+
+(* Main Circuit *)
+DEVICES
+    CLOCK(1) CLK;
+    DIVIDE_BY_4 DIV4_0, DIV4_1;
+NETS
+    CLK_16;
+CONNECT
+    DIV4_0.IN = CLK;
+    DIV4_1.IN = DIV4_0.OUT;
+    CLK_16 = DIV4_1.OUT;
+MONITOR
+    CLK, CLK_16;
