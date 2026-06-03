@@ -4,7 +4,7 @@ User guide
 Introduction
 ------------
 
-GF2 is a minimal logic simulator for digital circuits. It reads a text-based circuit definition file, constructs a network of connected devices and lets the user interact with that network through either a graphical interface or a command-line session.
+This is a logic simulator for digital circuits. It reads a text-based circuit definition file, constructs a network of connected devices and lets the user interact with that network through either a graphical interface or a command-line session.
 
 The simulator is intended for learning, experimentation and simple circuit validation. It supports a collection of common device types and provides signal monitoring to inspect circuit behaviour over time.
 
@@ -36,8 +36,8 @@ Quick start
 
 The repository includes two example circuit definition files in ``logsim/example_definition_files``. These are intended to help you explore the simulator quickly and to demonstrate different uses of the definition language.
 
-- ``stopwatch.txt`` is a compact sequential circuit that builds a dual-edge flop and ring counters. It shows how to define nested modules, instantiate devices such as ``DTYPE`` and ``NAND``, and connect nets for a simple timing circuit.
-- ``traffic.txt`` is a more complete example of a traffic light controller. It includes comments and reusable modules such as a 2-bit subtractor, a countdown timer, a two-state finite-state machine, and a clock gating circuit. It demonstrates the language's support for module hierarchy, combinational logic and stateful devices.
+- ``stopwatch.txt`` is a compact sequential circuit that builds a dual-edge flop and ring counters. It shows how to define nested modules and instantiate devices such as ``DTYPE`` and ``NAND`` to produce a simple, visually satisfying timing circuit.
+- ``traffic.txt`` is a complete example of a traffic light controller. It includes comments and reusable modules such as a 2-bit subtractor, a countdown timer, a two-state finite-state machine, the use of NETS and a clock gating circuit. It demonstrates the language's support for module hierarchy, combinational logic and stateful devices.
 
 To try the examples, open one directly from the repository root:
 
