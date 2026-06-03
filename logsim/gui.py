@@ -59,9 +59,8 @@ from parse import Parser
 # - File upload so that different files can be tested without restarting the program
 # - panels are collapsible if user does not want them visible, e.g. the available signals panel can be very long and is not always needed
 # - Help menu with instructions on how to use the GUI and explanations of the different features, e.g. the mouse controls for panning and zooming the waveform display
-
-# ----- Features to add -----
 # - Slider that shows the value of all signals at a particular cycle that can be dragged back and forth to explore the history of the simulation
+# - Undo/redo buttons
 
 # ----- Features that were considered but ultimately not implemented -----
 # - Live tracing mode where the display updates in real time as the simulation runs, instead of only after the user clicks 'Run cycles'
@@ -78,12 +77,14 @@ from parse import Parser
 ID_RUN = wx.NewIdRef()
 ID_RUN_ONE = wx.NewIdRef()
 ID_UNDO_CYCLE = wx.NewIdRef()
+ID_REDO_CYCLE = wx.NewIdRef()
 ID_HELP = wx.NewIdRef()
 ID_HELP_SHORTCUTS = wx.NewIdRef()
 ID_HELP_SYNTAX = wx.NewIdRef()
 ID_HELP_EXTERNAL_DOCS = wx.NewIdRef()
 ID_CLEAR_STATUS = wx.NewIdRef()
 ID_RESET_VIEW = wx.NewIdRef()
+ID_TOGGLE_CYCLE_INSPECTOR = wx.NewIdRef()
 ID_EXPORT_IMAGE = wx.NewIdRef()
 ID_EXPORT_CSV = wx.NewIdRef()
 ID_ZOOM_IN = wx.NewIdRef()
@@ -94,6 +95,9 @@ ID_SHOW_AVAILABLE_SIGNALS = wx.NewIdRef()
 ID_SHOW_SIMULATION = wx.NewIdRef()
 ID_SHOW_SWITCHES = wx.NewIdRef()
 ID_SHOW_CONSOLE = wx.NewIdRef()
+
+
+MAX_RUN_CYCLES = 1000
 
 
 THEMES = {
@@ -118,6 +122,7 @@ THEMES = {
         "canvas_grid_major": (0.83, 0.86, 0.90),
         "canvas_value_grid": (0.88, 0.90, 0.93),
         "canvas_trace": (0.11, 0.30, 0.85),
+        "canvas_label_bg": (1.0, 1.0, 1.0),
     },
     "dark": {
         "frame_bg": wx.Colour(32, 34, 37),
@@ -140,6 +145,7 @@ THEMES = {
         "canvas_grid_major": (0.28, 0.31, 0.36),
         "canvas_value_grid": (0.24, 0.27, 0.32),
         "canvas_trace": (0.42, 0.68, 1.0),
+        "canvas_label_bg": (0.08, 0.09, 0.10),
     },
 }
 
@@ -148,6 +154,10 @@ LIGHT_CLOSE_ICON_PATH = os.path.join(os.path.dirname(__file__), "icons", "x_icon
 DARK_CLOSE_ICON_PATH = os.path.join(os.path.dirname(__file__), "icons", "x_icon_dark.png")
 LIGHT_MODE_ICON_PATH = os.path.join(os.path.dirname(__file__), "icons", "light_mode.png")
 DARK_MODE_ICON_PATH = os.path.join(os.path.dirname(__file__), "icons", "dark_mode.png")
+LIGHT_UNDO_ICON_PATH = os.path.join(os.path.dirname(__file__), "icons", "undo_light.png")
+DARK_UNDO_ICON_PATH = os.path.join(os.path.dirname(__file__), "icons", "undo_dark.png")
+LIGHT_REDO_ICON_PATH = os.path.join(os.path.dirname(__file__), "icons", "redo_light.png")
+DARK_REDO_ICON_PATH = os.path.join(os.path.dirname(__file__), "icons", "redo_dark.png")
 
 
 def add_signal_to_module_tree(module_tree, full_signal_name, value):
@@ -226,6 +236,9 @@ class MyGLCanvas(wxcanvas.GLCanvas):
         # Initialise variables for zooming
         self.zoom = 1
         self.cycle_offset = 0
+        self.cycle_inspector_enabled = False
+        self.cycle_inspector_index = 0
+        self.waveform_layout = {"start_x": 0, "step": 20, "trace_length": 0}
 
         # Bind events to the canvas
         self.Bind(wx.EVT_PAINT, self.on_paint)
@@ -270,50 +283,13 @@ class MyGLCanvas(wxcanvas.GLCanvas):
                 size.height - 30,
             )
         else:
-            # The monitor dictionary only stores real traces
-            # The waveform display needs heading rows for modules so make a separate list of rows to draw
             display_rows = self.get_monitor_display_rows()
-
-            # Headings are shorter than traces
-            # Adding the row heights gives the amount of vertical space needed by the whole display
-            display_height = 0
-            for display_row in display_rows:
-                display_height += display_row["height"]
-
-            max_trace_length = 0
-            for monitor in self.monitors.monitors_dictionary.values():
-                trace_length = len(monitor.trace)
-                if trace_length > max_trace_length:
-                    max_trace_length = trace_length
-
-            max_name_length = 0
-            for row in display_rows:
-                name_length = len(row["label"])
-                if name_length > max_name_length:
-                    max_name_length = name_length
-
-            # Leave enough space for labels, but not more than 45% of the
-            # canvas width
-            label_space = max_name_length * 8 + 70
-            maximum_label_space = size.width * 0.45
-            if label_space > maximum_label_space:
-                start_x = maximum_label_space
-            else:
-                start_x = label_space
-
-            available_width = size.width - start_x - 20
-            if available_width < 1:
-                available_width = 1
-
-            step = 20
-            if max_trace_length > 0:
-                # Compress long traces horizontally instead of drawing
-                # off-screen
-                step = available_width / max_trace_length
-                if step > 20:
-                    step = 20
-                if step < 4:
-                    step = 4
+            layout = self.get_waveform_layout(display_rows)
+            display_height = layout["display_height"]
+            max_trace_length = layout["trace_length"]
+            start_x = layout["start_x"]
+            step = layout["step"]
+            self.waveform_layout = layout
 
             available_height = size.height - 115
             if available_height < 1:
@@ -361,7 +337,12 @@ class MyGLCanvas(wxcanvas.GLCanvas):
                 GL.glLineWidth(2.0)
                 self.draw_trace(display_row["trace"], start_x, low_y, high_y, step)
                 GL.glLineWidth(1.0)
+                if self.cycle_inspector_enabled and max_trace_length > 0:
+                    self.draw_cycle_inspector_value(display_row["trace"], self.cycle_inspector_index, start_x, low_y, high_y, step)
                 row_position += display_row["height"]
+
+            if self.cycle_inspector_enabled and max_trace_length > 0:
+                self.draw_cycle_inspector(max_trace_length, start_x, bottom_y, top_y + amplitude, step)
 
         # We have been drawing to the back buffer, flush the graphics pipeline
         # and swap the back buffer to the front
@@ -628,6 +609,15 @@ class MyGLCanvas(wxcanvas.GLCanvas):
         GL.glVertex2f(x2, y2)
         GL.glEnd()
 
+    def draw_filled_rectangle(self, x_pos, y_pos, width, height):
+        """Draw a filled rectangle on the canvas."""
+        GL.glBegin(GL.GL_QUADS)
+        GL.glVertex2f(x_pos, y_pos)
+        GL.glVertex2f(x_pos + width, y_pos)
+        GL.glVertex2f(x_pos + width, y_pos + height)
+        GL.glVertex2f(x_pos, y_pos + height)
+        GL.glEnd()
+
     def get_cycle_label_interval(self, step):
         """Return a readable cycle label interval for the current scale."""
         # Do not label every cycle, otherwise the numbers overlap and become unreadable - the interval depends on the zoom level
@@ -638,6 +628,50 @@ class MyGLCanvas(wxcanvas.GLCanvas):
         if step >= 6:
             return 20
         return 50
+
+    def get_waveform_layout(self, display_rows=None):
+        """Return horizontal waveform layout values used by drawing and controls."""
+        size = self.GetClientSize()
+        if display_rows is None:
+            display_rows = self.get_monitor_display_rows()
+
+        display_height = 0
+        max_name_length = 0
+        for display_row in display_rows:
+            display_height += display_row["height"]
+            name_length = len(display_row["label"])
+            if name_length > max_name_length:
+                max_name_length = name_length
+
+        max_trace_length = 0
+        for monitor in self.monitors.monitors_dictionary.values():
+            trace_length = len(monitor.trace)
+            if trace_length > max_trace_length:
+                max_trace_length = trace_length
+
+        label_space = max_name_length * 8 + 70
+        maximum_label_space = size.width * 0.45
+        if label_space > maximum_label_space:
+            start_x = maximum_label_space
+        else:
+            start_x = label_space
+
+        available_width = size.width - start_x - 20
+        if available_width < 1:
+            available_width = 1
+
+        step = 20
+        if max_trace_length > 0:
+            step = available_width / max_trace_length
+            if step > 20:
+                step = 20
+            if step < 4:
+                step = 4
+
+        return {"display_height": display_height,
+                "start_x": start_x,
+                "step": step,
+                "trace_length": max_trace_length}
 
     def draw_cycle_axis(self, trace_length, start_x, axis_y, bottom_y, top_y, step, cycle_offset=0):
         """Draw the shared x-axis showing simulation cycles."""
@@ -722,6 +756,53 @@ class MyGLCanvas(wxcanvas.GLCanvas):
             self.draw_line(x_start, current_y, x_end, current_y)
             previous_y = current_y
 
+    def signal_to_display_text(self, signal):
+        """Return a short text value for a signal on the canvas."""
+        if signal == self.devices.HIGH or signal == self.devices.RISING:
+            return "1"
+        if signal == self.devices.LOW or signal == self.devices.FALLING:
+            return "0"
+        if signal == self.devices.BLANK:
+            return "-"
+        return str(signal)
+
+    def draw_cycle_inspector(self, trace_length, start_x, bottom_y, top_y, step):
+        """Draw a vertical cursor for the selected inspected cycle."""
+        if trace_length <= 0:
+            return
+
+        cursor_x = self.get_cycle_inspector_x(trace_length, start_x, step)
+        GL.glColor3f(*self.theme["canvas_axis"])
+        GL.glLineWidth(1.5)
+        self.draw_line(cursor_x, bottom_y - 8, cursor_x, top_y + 4)
+        GL.glLineWidth(1.0)
+
+    def get_cycle_inspector_x(self, trace_length, start_x, step):
+        """Return the x-position of the cycle inspector cursor."""
+        cycle_index = min(self.cycle_inspector_index, trace_length - 1)
+        return start_x + (cycle_index + 1) * step
+
+    def draw_cycle_inspector_value(self, trace, cycle_index, start_x, low_y, high_y, step):
+        """Draw the selected cycle value beside one trace."""
+        if cycle_index < 0 or cycle_index >= len(trace):
+            value_text = "-"
+        else:
+            value_text = self.signal_to_display_text(trace[cycle_index])
+
+        cursor_x = start_x + (cycle_index + 1) * step
+        value_y = low_y + (high_y - low_y) / 2 - 4
+        text_x = cursor_x + 6
+        background_rect = self.get_cycle_inspector_value_background(text_x, value_y, value_text)
+        GL.glColor3f(*self.theme["canvas_label_bg"])
+        self.draw_filled_rectangle(*background_rect)
+        self.render_text(value_text, text_x, value_y, colour=self.theme["canvas_text"])
+
+    def get_cycle_inspector_value_background(self, text_x, text_y, value_text):
+        """Return the rectangle behind one cycle inspector value."""
+        width = len(value_text) * 8 + 8
+        height = 16
+        return (text_x - 4, text_y - 4, width, height)
+
 
 ###############################################################################
 # GUI FRAME
@@ -770,6 +851,7 @@ class Gui(wx.Frame):
         # Total cycles since the last reset
         self.total_cycles_completed = 0
         self.simulation_history = []
+        self.redo_history = []
 
         # Configure the file menu
         file_menu = wx.Menu()
@@ -796,16 +878,19 @@ class Gui(wx.Frame):
         view_menu.Append(ID_RESET_VIEW, "Reset view\tctrl+0")
         view_menu.AppendSeparator()
 
+        self.cycle_inspector_menu_item = view_menu.AppendCheckItem(ID_TOGGLE_CYCLE_INSPECTOR, "Show cycle inspector")
+        view_menu.AppendSeparator()
+
         if self.theme_name == "dark":
             theme_label = "Switch to light mode\tctrl+shift+T"
         else:
             theme_label = "Switch to dark mode\tctrl+shift+T"
 
         self.theme_menu_item = view_menu.Append(ID_TOGGLE_THEME, theme_label)
-        self.window_menu_items = {"available_signals": window_menu.Append(ID_SHOW_AVAILABLE_SIGNALS, "Show Available signals\tctrl+1"),
-                                  "simulation": window_menu.Append(ID_SHOW_SIMULATION, "Show Simulation\tctrl+2"),
-                                  "switches": window_menu.Append(ID_SHOW_SWITCHES, "Show Switches\tctrl+3"),
-                                  "console": window_menu.Append(ID_SHOW_CONSOLE, "Show Console\tctrl+4")}
+        self.window_menu_items = {"available_signals": window_menu.AppendCheckItem(ID_SHOW_AVAILABLE_SIGNALS, "Show Available signals\tctrl+1"),
+                                  "simulation": window_menu.AppendCheckItem(ID_SHOW_SIMULATION, "Show Simulation\tctrl+2"),
+                                  "switches": window_menu.AppendCheckItem(ID_SHOW_SWITCHES, "Show Switches\tctrl+3"),
+                                  "console": window_menu.AppendCheckItem(ID_SHOW_CONSOLE, "Show Console\tctrl+4")}
         
         menu_bar.Append(file_menu, "&File")
         menu_bar.Append(view_menu, "&View")
@@ -831,7 +916,17 @@ class Gui(wx.Frame):
         self.console_box = wx.TextCtrl(self, wx.ID_ANY, "", style=wx.TE_MULTILINE | wx.TE_READONLY)
         self.console_box.SetMinSize((-1, 90))
         self.clear_status_button = wx.Button(self, wx.ID_ANY, "Clear console")
-        self.toggle_theme_button = wx.Button(self, wx.ID_ANY, "", size=(34, 34))
+        self.cycle_inspector_panel = wx.Panel(self, wx.ID_ANY)
+        self.cycle_inspector_label = wx.StaticText(self.cycle_inspector_panel, wx.ID_ANY, "Cycle:")
+        self.cycle_inspector_entry = wx.TextCtrl(self.cycle_inspector_panel, wx.ID_ANY, "-", style=wx.TE_PROCESS_ENTER)
+        self.cycle_inspector_entry.SetMinSize((70, -1))
+        self.cycle_inspector_slider = wx.Slider(self.cycle_inspector_panel, wx.ID_ANY, 0, 0, 1, style=wx.SL_HORIZONTAL)
+        self.cycle_inspector_panel.Hide()
+        self.undo_button = wxbuttons.GenBitmapButton(self, wx.ID_ANY, wx.Bitmap(1, 1), size=(28, 28), style=wx.BORDER_NONE)
+        self.redo_button = wxbuttons.GenBitmapButton(self, wx.ID_ANY, wx.Bitmap(1, 1), size=(28, 28), style=wx.BORDER_NONE)
+        self.toggle_theme_button = wxbuttons.GenBitmapButton(self, wx.ID_ANY, wx.Bitmap(1, 1), size=(34, 34))
+        self.undo_button.SetMinSize((28, 28))
+        self.redo_button.SetMinSize((28, 28))
         self.toggle_theme_button.SetMinSize((34, 34))
         self.switch_rows = wx.ScrolledWindow(self, wx.ID_ANY, style=wx.VSCROLL | wx.BORDER_SIMPLE)
         self.switch_rows.SetScrollRate(0, 10)
@@ -877,13 +972,20 @@ class Gui(wx.Frame):
         self.reset_button.Bind(wx.EVT_BUTTON, self.on_reset_button)
         self.clear_traces_button.Bind(wx.EVT_BUTTON, self.on_clear_traces)
         self.clear_status_button.Bind(wx.EVT_BUTTON, self.on_clear_status)
+        self.cycle_inspector_slider.Bind(wx.EVT_SLIDER, self.on_cycle_inspector_slider)
+        self.cycle_inspector_entry.Bind(wx.EVT_TEXT_ENTER, self.on_cycle_inspector_entry)
+        self.cycle_inspector_entry.Bind(wx.EVT_KILL_FOCUS, self.on_cycle_inspector_entry)
+        self.undo_button.Bind(wx.EVT_BUTTON, self.on_undo_cycle)
+        self.redo_button.Bind(wx.EVT_BUTTON, self.on_redo_cycle)
         self.toggle_theme_button.Bind(wx.EVT_BUTTON, self.on_toggle_theme)
 
         self.Bind(wx.EVT_MENU, self.on_run_cycles_button, id=ID_RUN)
         self.Bind(wx.EVT_MENU, self.on_run_one_cycle, id=ID_RUN_ONE)
         self.Bind(wx.EVT_MENU, self.on_undo_cycle, id=ID_UNDO_CYCLE)
+        self.Bind(wx.EVT_MENU, self.on_redo_cycle, id=ID_REDO_CYCLE)
         self.Bind(wx.EVT_MENU, self.on_clear_status, id=ID_CLEAR_STATUS)
         self.Bind(wx.EVT_MENU, self.on_reset_view, id=ID_RESET_VIEW)
+        self.Bind(wx.EVT_MENU, self.on_toggle_cycle_inspector, id=ID_TOGGLE_CYCLE_INSPECTOR)
         self.Bind(wx.EVT_MENU, self.on_export_image, id=ID_EXPORT_IMAGE)
         self.Bind(wx.EVT_MENU, self.on_export_csv, id=ID_EXPORT_CSV)
         self.Bind(wx.EVT_MENU, self.on_zoom_in, id=ID_ZOOM_IN)
@@ -899,11 +1001,13 @@ class Gui(wx.Frame):
         accelerators = wx.AcceleratorTable([
             (wx.ACCEL_NORMAL, wx.WXK_SPACE, ID_RUN),  # Space: run cycles
             (wx.ACCEL_NORMAL, wx.WXK_RIGHT, ID_RUN_ONE),  # Right arrow: run one cycle
-            (wx.ACCEL_NORMAL, wx.WXK_LEFT, ID_UNDO_CYCLE),  # Left arrow: undo one cycle
+            (wx.ACCEL_CTRL, ord("Z"), ID_UNDO_CYCLE),  # Ctrl+Z: undo one cycle
+            (wx.ACCEL_CTRL, ord("Y"), ID_REDO_CYCLE),  # Ctrl+Y: redo one cycle
             (wx.ACCEL_CTRL, ord("O"), ID_OPEN_FILE),  # Ctrl+O: open file
             (wx.ACCEL_CTRL, ord("="), ID_ZOOM_IN),  # Ctrl+=: zoom in
             (wx.ACCEL_CTRL, ord("-"), ID_ZOOM_OUT),  # Ctrl+-: zoom out
             (wx.ACCEL_CTRL, ord("0"), ID_RESET_VIEW),  # Ctrl+0: reset view
+            (wx.ACCEL_CTRL, ord("I"), ID_TOGGLE_CYCLE_INSPECTOR),  # Ctrl+I: show/hide cycle inspector
             (wx.ACCEL_CTRL | wx.ACCEL_SHIFT, ord("P"), ID_EXPORT_IMAGE),  # Ctrl+Shift+P: export PNG
             (wx.ACCEL_CTRL | wx.ACCEL_SHIFT, ord("E"), ID_EXPORT_CSV),  # Ctrl+Shift+E: export CSV
             (wx.ACCEL_CTRL | wx.ACCEL_SHIFT, ord("T"), ID_TOGGLE_THEME),  # Ctrl+Shift+T: light/dark mode
@@ -919,14 +1023,16 @@ class Gui(wx.Frame):
         # Configure sizers for layout
         root_sizer = wx.BoxSizer(wx.VERTICAL)
         main_sizer = wx.BoxSizer(wx.HORIZONTAL)
+        canvas_sizer = wx.BoxSizer(wx.VERTICAL)
         side_sizer = wx.BoxSizer(wx.VERTICAL)
+        history_theme_sizer = wx.BoxSizer(wx.HORIZONTAL)
         self.section_panels = {}
         self.section_titles = {}
         self.section_close_buttons = {}
 
         simulation_panel, simulation_sizer = self.create_section_panel("Simulation", "simulation")
         self.spin = wx.SpinCtrl(simulation_panel, wx.ID_ANY, "10")
-        self.spin.SetRange(1, 100000)
+        self.spin.SetRange(1, MAX_RUN_CYCLES)
         self.spin.SetMinSize((120, -1))
         self.text.Reparent(simulation_panel)
         self.cycles_completed_text.Reparent(simulation_panel)
@@ -953,13 +1059,28 @@ class Gui(wx.Frame):
         self.console_box.Reparent(console_panel)
         console_sizer.Add(self.console_box, 1, wx.EXPAND | wx.ALL, 6)
 
+        inspector_sizer = wx.BoxSizer(wx.HORIZONTAL)
+        inspector_sizer.Add(self.cycle_inspector_label, 0, wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, 4)
+        inspector_sizer.Add(self.cycle_inspector_entry, 0, wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, 8)
+        self.cycle_inspector_slider.SetMinSize((120, -1))
+        inspector_sizer.Add(self.cycle_inspector_slider, 1, wx.EXPAND)
+        self.cycle_inspector_panel.SetSizer(inspector_sizer)
+        canvas_sizer.Add(self.canvas, 1, wx.EXPAND)
+        canvas_sizer.Add(self.cycle_inspector_panel, 0, wx.EXPAND | wx.LEFT | wx.RIGHT | wx.BOTTOM, 5)
+
+        self.undo_button.Reparent(self)
+        self.redo_button.Reparent(self)
         self.toggle_theme_button.Reparent(self)
-        side_sizer.Add(self.toggle_theme_button, 0, wx.ALIGN_RIGHT | wx.BOTTOM, 8)
+        history_theme_sizer.Add(self.undo_button, 0, wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, 4)
+        history_theme_sizer.Add(self.redo_button, 0, wx.ALIGN_CENTER_VERTICAL)
+        history_theme_sizer.AddStretchSpacer()
+        history_theme_sizer.Add(self.toggle_theme_button, 0)
+        side_sizer.Add(history_theme_sizer, 0, wx.EXPAND | wx.BOTTOM, 8)
         side_sizer.Add(simulation_panel, 0, wx.EXPAND | wx.BOTTOM, 8)
         side_sizer.Add(switch_panel, 1, wx.EXPAND | wx.BOTTOM, 8)
 
         main_sizer.Add(signal_panel, 0, wx.EXPAND | wx.ALL, 8)
-        main_sizer.Add(self.canvas, 4, wx.EXPAND | wx.ALL, 5)
+        main_sizer.Add(canvas_sizer, 4, wx.EXPAND | wx.ALL, 5)
         main_sizer.Add(side_sizer, 0, wx.EXPAND | wx.ALL, 8)
 
         root_sizer.Add(main_sizer, 1, wx.EXPAND)
@@ -1022,11 +1143,13 @@ class Gui(wx.Frame):
             "F1: quick start help\n"
             "Space: run the selected number of cycles\n"
             "Right arrow: run one cycle\n"
-            "Left arrow: undo one cycle\n"
+            "Ctrl+Z: undo one cycle\n"
+            "Ctrl+Y: redo one cycle\n"
             "Ctrl+O: open a circuit file\n"
             "Ctrl+=: zoom in\n"
             "Ctrl+-: zoom out\n"
             "Ctrl+0: reset waveform view\n"
+            "Ctrl+I: show or hide cycle inspector\n"
             "Ctrl+Shift+T: switch light/dark mode\n"
             "Ctrl+Shift+P: export waveform as PNG\n"
             "Ctrl+Shift+E: export traces as CSV\n"
@@ -1062,6 +1185,11 @@ class Gui(wx.Frame):
         if cycles <= 0:
             self.show_status("Error: number of cycles must be positive.")
             return False
+        if cycles > MAX_RUN_CYCLES:
+            self.show_status(f"Error: cannot run more than {MAX_RUN_CYCLES} cycles at once.")
+            return False
+
+        self.redo_history = []
 
         # Run one cycle at a time and record the monitored signals
         for _ in range(cycles):
@@ -1079,6 +1207,8 @@ class Gui(wx.Frame):
             self.total_cycles_completed += 1
 
         self.update_cycles_completed_text()
+        self.update_history_buttons()
+        self.update_cycle_inspector_range()
         return True
 
     def get_simulation_snapshot(self):
@@ -1123,6 +1253,113 @@ class Gui(wx.Frame):
         self.total_cycles_completed = simulation_snapshot["total_cycles_completed"]
         self.canvas.cycle_offset = simulation_snapshot["cycle_offset"]
         self.update_cycles_completed_text()
+        self.update_cycle_inspector_range()
+
+    def update_history_buttons(self):
+        """Enable undo and redo buttons only when their history stacks have entries."""
+        if hasattr(self, "undo_button"):
+            self.undo_button.Enable(bool(self.simulation_history))
+        if hasattr(self, "redo_button"):
+            self.redo_button.Enable(bool(self.redo_history))
+
+    def get_max_trace_length(self):
+        """Return the longest recorded monitor trace length."""
+        max_trace_length = 0
+        for monitor in self.monitors.monitors_dictionary.values():
+            trace_length = len(monitor.trace)
+            if trace_length > max_trace_length:
+                max_trace_length = trace_length
+        return max_trace_length
+
+    def update_cycle_inspector_range(self):
+        """Keep the cycle inspector slider in sync with recorded traces."""
+        if not hasattr(self, "cycle_inspector_slider"):
+            return
+
+        max_trace_length = self.get_max_trace_length()
+        if max_trace_length <= 0:
+            self.cycle_inspector_slider.SetRange(0, 1)
+            self.cycle_inspector_slider.SetValue(0)
+            self.cycle_inspector_slider.Enable(False)
+            self.cycle_inspector_entry.SetValue("-")
+            self.cycle_inspector_entry.Enable(False)
+            self.update_cycle_inspector_label_width()
+            self.canvas.cycle_inspector_index = 0
+            return
+
+        max_index = max_trace_length - 1
+        current_index = self.canvas.cycle_inspector_index
+        if current_index > max_index:
+            current_index = max_index
+
+        if max_trace_length == 1:
+            self.cycle_inspector_slider.SetRange(0, 1)
+        else:
+            self.cycle_inspector_slider.SetRange(1, max_trace_length)
+        self.cycle_inspector_slider.SetValue(self.cycle_index_to_slider_value(current_index))
+        self.cycle_inspector_slider.Enable(True)
+        self.cycle_inspector_entry.Enable(True)
+        self.canvas.cycle_inspector_index = current_index
+        self.update_cycle_inspector_label()
+
+    def update_cycle_inspector_label(self):
+        """Show the real cycle number selected by the inspector."""
+        selected_cycle = self.canvas.cycle_offset + self.canvas.cycle_inspector_index + 1
+        if self.cycle_inspector_entry.GetValue() != str(selected_cycle):
+            self.cycle_inspector_entry.SetValue(str(selected_cycle))
+        self.update_cycle_inspector_label_width()
+
+    def update_cycle_inspector_label_width(self):
+        """Give the cycle inspector label enough room for its current text."""
+        if not hasattr(self.cycle_inspector_label, "GetTextExtent"):
+            return
+
+        text_width, _ = self.cycle_inspector_entry.GetTextExtent(self.cycle_inspector_entry.GetValue())
+        entry_width = max(text_width + 18, 70)
+        self.cycle_inspector_entry.SetMinSize((entry_width, -1))
+        if hasattr(self, "cycle_inspector_panel"):
+            self.cycle_inspector_panel.Layout()
+
+    def cycle_index_to_slider_value(self, cycle_index):
+        """Convert a trace list index into the matching slider value."""
+        return cycle_index + 1
+
+    def slider_value_to_cycle_index(self, slider_value):
+        """Convert the slider value back into a trace list index."""
+        if slider_value <= 1:
+            return 0
+        return slider_value - 1
+
+    def cycle_number_to_cycle_index(self, cycle_number):
+        """Convert a displayed cycle number into a trace list index."""
+        max_trace_length = self.get_max_trace_length()
+        if max_trace_length <= 0:
+            return 0
+
+        minimum_cycle = self.canvas.cycle_offset + 1
+        maximum_cycle = self.canvas.cycle_offset + max_trace_length
+        if cycle_number < minimum_cycle:
+            cycle_number = minimum_cycle
+        if cycle_number > maximum_cycle:
+            cycle_number = maximum_cycle
+
+        return cycle_number - self.canvas.cycle_offset - 1
+
+    def set_cycle_inspector_index(self, cycle_index):
+        """Set the inspected cycle and update the slider and entry."""
+        max_trace_length = self.get_max_trace_length()
+        if max_trace_length <= 0:
+            self.update_cycle_inspector_range()
+            return
+
+        if cycle_index < 0:
+            cycle_index = 0
+        if cycle_index >= max_trace_length:
+            cycle_index = max_trace_length - 1
+
+        self.canvas.cycle_inspector_index = cycle_index
+        self.cycle_inspector_slider.SetValue(self.cycle_index_to_slider_value(cycle_index))
+        self.update_cycle_inspector_label()
 
     def show_status(self, message):
         """Display a status message in the GUI."""
@@ -1186,11 +1423,27 @@ class Gui(wx.Frame):
             self.show_status("Error: no simulation cycle to undo.")
             return
 
+        self.redo_history.append(self.get_simulation_snapshot())
         simulation_snapshot = self.simulation_history.pop()
         self.restore_simulation_snapshot(simulation_snapshot)
-        self.update_switch_rows()
+        self.refresh_switch_rows()
         self.canvas.render()
+        self.update_history_buttons()
         self.show_status("Undid 1 cycle.")
+
+    def on_redo_cycle(self, event):
+        """Redo the most recently undone simulation cycle."""
+        if not self.redo_history:
+            self.show_status("Error: no simulation cycle to redo.")
+            return
+
+        self.simulation_history.append(self.get_simulation_snapshot())
+        simulation_snapshot = self.redo_history.pop()
+        self.restore_simulation_snapshot(simulation_snapshot)
+        self.refresh_switch_rows()
+        self.canvas.render()
+        self.update_history_buttons()
+        self.show_status("Redid 1 cycle.")
 
     def on_reset_button(self, event):
         """Reset the simulation state and traces."""
@@ -1200,10 +1453,13 @@ class Gui(wx.Frame):
         self.cycles_completed = 0
         self.total_cycles_completed = 0
         self.simulation_history = []
+        self.redo_history = []
         self.canvas.cycle_offset = 0
         self.update_cycles_completed_text()
         self.canvas.reset_view()
+        self.update_cycle_inspector_range()
         self.canvas.render()
+        self.update_history_buttons()
         self.show_status("Reset simulation.")
 
     def on_clear_traces(self, event):
@@ -1212,9 +1468,12 @@ class Gui(wx.Frame):
         self.monitors.reset_monitors()
         self.cycles_completed = 0
         self.simulation_history = []
+        self.redo_history = []
         self.canvas.cycle_offset = self.total_cycles_completed
         self.update_cycles_completed_text()
+        self.update_cycle_inspector_range()
         self.canvas.render()
+        self.update_history_buttons()
         self.show_status("Cleared traces.")
 
     def on_clear_status(self, event):
@@ -1237,6 +1496,44 @@ class Gui(wx.Frame):
         self.canvas.reset_view()
         self.set_status("Reset view")
 
+    def on_toggle_cycle_inspector(self, event):
+        """Show or hide the cycle inspector slider."""
+        inspector_is_visible = self.cycle_inspector_menu_item.IsChecked()
+        self.canvas.cycle_inspector_enabled = inspector_is_visible
+
+        if inspector_is_visible:
+            self.update_cycle_inspector_range()
+            self.cycle_inspector_panel.Show()
+            self.set_status("Shown cycle inspector")
+        else:
+            self.cycle_inspector_panel.Hide()
+            self.set_status("Hidden cycle inspector")
+
+        self.Layout()
+        self.canvas.render()
+
+    def on_cycle_inspector_slider(self, event):
+        """Update the inspected cycle from the slider."""
+        slider_value = self.cycle_inspector_slider.GetValue()
+        self.set_cycle_inspector_index(self.slider_value_to_cycle_index(slider_value))
+        self.canvas.render()
+
+    def on_cycle_inspector_entry(self, event):
+        """Jump to the cycle typed into the cycle inspector."""
+        try:
+            cycle_number = int(self.cycle_inspector_entry.GetValue())
+            
+        except ValueError:
+            self.update_cycle_inspector_label()
+            if hasattr(event, "Skip"):
+                event.Skip()
+            return
+
+        self.set_cycle_inspector_index(self.cycle_number_to_cycle_index(cycle_number))
+        self.canvas.render()
+        if hasattr(event, "Skip"):
+            event.Skip()
+
     def on_toggle_theme(self, event):
         """Switch between light and dark mode."""
         if self.theme_name == "dark":
@@ -1255,7 +1552,7 @@ class Gui(wx.Frame):
         self.Layout()
 
     def on_show_section(self, event):
-        """Show one hidden side panel section from the Window menu."""
+        """Show or hide one side panel section from the Window menu."""
         menu_id = event.GetId()
         if menu_id == ID_SHOW_AVAILABLE_SIGNALS:
             section_name = "available_signals"
@@ -1266,9 +1563,7 @@ class Gui(wx.Frame):
         else:
             section_name = "console"
 
-        self.section_panels[section_name].Show()
-        self.section_close_buttons[section_name].SetLabel("X")
-        self.section_close_buttons[section_name].Refresh()
+        self.section_panels[section_name].Show(event.IsChecked())
         self.update_section_window_menu()
         self.Layout()
 
@@ -1348,9 +1643,9 @@ class Gui(wx.Frame):
         return panel, body_sizer
 
     def update_section_window_menu(self):
-        """Enable Window menu items only for hidden sections."""
+        """Tick Window menu items for panels that are visible."""
         for section_name, menu_item in self.window_menu_items.items():
-            menu_item.Enable(not self.section_panels[section_name].IsShown())
+            menu_item.Check(self.section_panels[section_name].IsShown())
 
     def get_system_theme_name(self):
         """Return the OS light/dark appearance when wx exposes it."""
@@ -1380,6 +1675,15 @@ class Gui(wx.Frame):
             self.theme_menu_item.SetItemLabel("Switch to light mode\tctrl+shift+T")
         else:
             self.theme_menu_item.SetItemLabel("Switch to dark mode\tctrl+shift+T")
+        if self.theme_name == "dark":
+            undo_icon_path = DARK_UNDO_ICON_PATH
+            redo_icon_path = DARK_REDO_ICON_PATH
+        else:
+            undo_icon_path = LIGHT_UNDO_ICON_PATH
+            redo_icon_path = LIGHT_REDO_ICON_PATH
+
+        self.apply_history_button_theme(self.undo_button, undo_icon_path, "Undo one cycle")
+        self.apply_history_button_theme(self.redo_button, redo_icon_path, "Redo one cycle")
         self.apply_theme_toggle_button()
 
         self.SetBackgroundColour(self.theme["frame_bg"])
@@ -1394,7 +1698,10 @@ class Gui(wx.Frame):
                            self.reset_button,
                            self.clear_traces_button,
                            self.clear_status_button,
-                           self.toggle_theme_button,
+                           self.cycle_inspector_panel,
+                           self.cycle_inspector_label,
+                           self.cycle_inspector_entry,
+                           self.cycle_inspector_slider,
                            self.switch_rows,
                            self.module_signal_rows,
                            self.monitor_rows]
@@ -1410,6 +1717,7 @@ class Gui(wx.Frame):
         self.update_switch_rows()
         self.update_module_signal_rows()
         self.update_monitor_rows()
+        self.update_history_buttons()
         self.Layout()
         self.Refresh()
         self.canvas.Refresh()
@@ -1459,6 +1767,29 @@ class Gui(wx.Frame):
         image = image.Scale(size, size, wx.IMAGE_QUALITY_HIGH)
         return wx.Bitmap(image)
 
+    def apply_history_button_theme(self, button, icon_path, tooltip):
+        """Apply icon and colours to an undo or redo button."""
+        button.SetBackgroundColour(self.theme["frame_bg"])
+        button.SetForegroundColour(self.theme["text"])
+        button.SetToolTip(tooltip)
+
+        if hasattr(button, "SetBezelWidth"):
+            button.SetBezelWidth(0)
+        if hasattr(button, "SetMargins"):
+            button.SetMargins(0, 0)
+        if hasattr(button, "SetUseFocusIndicator"):
+            button.SetUseFocusIndicator(False)
+
+        bitmap = self.load_icon_bitmap(icon_path, 16)
+        if bitmap is not None:
+            button.SetLabel("")
+            button.SetBitmapLabel(bitmap)
+        else:
+            button.SetLabel(tooltip.split()[0])
+            button.SetBitmapLabel(wx.Bitmap(1, 1))
+
+        button.Refresh()
+
     def apply_theme_toggle_button(self):
         """Apply icon to the day/night mode button."""
         if self.theme_name == "dark":
@@ -1472,13 +1803,20 @@ class Gui(wx.Frame):
 
         bitmap = self.load_icon_bitmap(icon_path, 20)
         self.toggle_theme_button.SetToolTip(tooltip)
+        self.toggle_theme_button.SetBackgroundColour(self.theme["button_bg"])
+        self.toggle_theme_button.SetForegroundColour(self.theme["text"])
+
+        if hasattr(self.toggle_theme_button, "SetBezelWidth"):
+            self.toggle_theme_button.SetBezelWidth(0)
+        if hasattr(self.toggle_theme_button, "SetUseFocusIndicator"):
+            self.toggle_theme_button.SetUseFocusIndicator(False)
 
         if bitmap is not None:
             self.toggle_theme_button.SetLabel("")
-            self.toggle_theme_button.SetBitmap(bitmap)
+            self.toggle_theme_button.SetBitmapLabel(bitmap)
         else:
             self.toggle_theme_button.SetLabel(fallback_label)
-            self.toggle_theme_button.SetBitmap(wx.NullBitmap)
+            self.toggle_theme_button.SetBitmapLabel(wx.Bitmap(1, 1))
 
         self.toggle_theme_button.Refresh()
 
@@ -1548,6 +1886,22 @@ class Gui(wx.Frame):
         low_label.Refresh()
         high_label.Refresh()
 
+    def refresh_switch_rows(self):
+        """Update existing switch controls without rebuilding the switch panel."""
+        refreshed_low_buttons = set()
+
+        for switch_name, _, low_button, high_button, low_label, high_label in self.switch_state_buttons.values():
+            if low_button.GetId() in refreshed_low_buttons:
+                continue
+
+            switch_id = self.names.query(switch_name)
+            device = self.devices.get_device(switch_id)
+            
+            if device is not None:
+                self.update_switch_state_buttons(low_button, high_button, low_label, high_label, device.switch_state)
+
+            refreshed_low_buttons.add(low_button.GetId())
+
     def load_network_file(self, path):
         """Parse a circuit file and replace the current simulator state."""
         names = Names()
@@ -1579,6 +1933,7 @@ class Gui(wx.Frame):
         self.cycles_completed = 0
         self.total_cycles_completed = 0
         self.simulation_history = []
+        self.redo_history = []
         self.module_signal_expanded_paths = set()
 
         self.canvas.devices = devices
@@ -1590,6 +1945,8 @@ class Gui(wx.Frame):
         self.update_module_signal_rows()
         self.update_switch_rows()
         self.update_monitor_rows()
+        self.update_history_buttons()
+        self.update_cycle_inspector_range()
         self.SetTitle(f"Logic Simulator - {path}")
         self.show_status(f"Loaded {path}.")
         self.canvas.render()
@@ -1833,7 +2190,11 @@ class Gui(wx.Frame):
                 collapsible_pane.Collapse(False)
 
             collapsible_pane.Bind(wx.EVT_COLLAPSIBLEPANE_CHANGED, self.on_module_signal_pane_changed)
-            parent_sizer.Add(collapsible_pane, 0, wx.EXPAND | wx.ALL, 4)
+            pane_row_sizer = wx.BoxSizer(wx.HORIZONTAL)
+            if parent_path:
+                pane_row_sizer.AddSpacer(24)
+            pane_row_sizer.Add(collapsible_pane, 1, wx.EXPAND)
+            parent_sizer.Add(pane_row_sizer, 0, wx.EXPAND | wx.ALL, 4)
 
     def store_module_signal_pane_state(self):
         """Remember which module panes are expanded before rebuilding."""
@@ -1852,6 +2213,7 @@ class Gui(wx.Frame):
         # row always has one button
         # Its label and handler are set by update_available_signal_button() depending on whether the signal is already monitored
         action_button = wx.Button(parent, wx.ID_ANY, "")
+        action_button.SetMinSize((72, 26))
         self.module_signal_button_names[action_button.GetId()] = signal_name
         self.module_signal_action_buttons[signal_name] = action_button
         self.update_available_signal_button(action_button, signal_name)
@@ -1951,6 +2313,8 @@ class Gui(wx.Frame):
 
         if switch_was_set:
             self.simulation_history = []
+            self.redo_history = []
+            self.update_history_buttons()
             if switch_value == 1:
                 switch_label = "HIGH"
             else:
@@ -1994,6 +2358,9 @@ class Gui(wx.Frame):
 
         if self.monitors.remove_monitor(signal_name):
             self.simulation_history = []
+            self.redo_history = []
+            self.update_history_buttons()
+            self.update_cycle_inspector_range()
             self.show_status(f"Removed monitor for {signal_name}.")
         else:
             self.show_status(f"Error: {signal_name} is not monitored.")
@@ -2030,6 +2397,9 @@ class Gui(wx.Frame):
         # confirm success if it works
         if error_type == self.monitors.NO_ERROR:
             self.simulation_history = []
+            self.redo_history = []
+            self.update_history_buttons()
+            self.update_cycle_inspector_range()
             self.show_status(f"Added monitor for {monitor_name}.")
             if refresh_available_signals:
                 self.update_module_signal_rows()

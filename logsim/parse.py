@@ -42,7 +42,10 @@ MAX_MODULE_INSTANTIATION_DEPTH = 20
 #
 #    - In general, syntax parsing functions that return an object return
 #    the object if successful, and None if unsuccessful (after which
-#    it also leaves the parser in a synchronized state).
+#    it also leaves the parser in a synchronized state). In some cases
+#    these functions may return False instead of None - this means
+#    the parser is lost (e.g. likely missing keyword) 
+#    and further parsing should be aborted. 
 #
 #    - Parsing functions that only parse without returning an object
 #    return True if the parser is still in a known state (regardless
@@ -627,6 +630,36 @@ class Parser:
             )
             hint = self.name_typo_hint(bad_name_id, module_port_ids, "module's port")
         return hint
+        
+    def device_kind_typo_hint(self, bad_kind_id):
+        """Return string containing typo hint for device kinds and module types.
+        
+        Arguments:
+        bad_kind_id: name ID found that doesn't match device kind or module type
+        """
+        primitive_device_ids = list(self.devices.gate_types) + [
+            self.devices.CLOCK,
+            self.devices.SWITCH,
+            self.devices.D_TYPE,
+        ]
+
+        hint = self.name_typo_hint(
+            bad_kind_id,
+            primitive_device_ids,
+            "device type",
+        )
+
+        module_type_ids = []
+        for module_definition in self.module_definitions.values():
+            module_type_ids.append(module_definition.name_symbol.id)
+
+        hint += self.name_typo_hint(
+            bad_kind_id,
+            module_type_ids,
+            "module type",
+        )
+
+        return hint
 
     #############################################################################################
     # PARSING HELPER FUNCTIONS
@@ -870,6 +903,7 @@ class Parser:
         if self.symbol.type != self.scanner.EQUALS:
             errormsg = "Expected '=' in connection"
             errormsg += self.section_typo_hint("MONITOR")
+            errormsg += self.section_typo_hint("ENDMODULE")
             self.error(errormsg, synchronize=True)
 
             return None
@@ -935,12 +969,19 @@ class Parser:
                     return None
                 return "module", module_name_id, None
 
+            # We've got a name that's not a module type 
+            # Display a relevant error msg
             errormsg = "Expected primitive device type (e.g. AND) " \
-                       "or previously-defined module name"
+                    "or previously-defined module name"
+
+            errormsg += self.device_kind_typo_hint(self.symbol.id)
+            errormsg += self.section_typo_hint("NETS")
+
             if self.device_exists(self.symbol):
                 errormsg += "\nAre you trying to connect a device? "
                 errormsg += "This should be done in the CONNECT section."
                 errormsg += self.section_typo_hint("CONNECT")
+
             self.error(errormsg, synchronize=True)
             return None
 
@@ -980,7 +1021,8 @@ class Parser:
         EBNF: device_kind, name_list, ';'.
 
         Return a tuple (device_kind_symbol, device_kind_result, device_names) if
-        successful, or None on error.
+        successful, or None on error. Return False on error and if the parser is 
+        likely lost due to structural issues in the file.
 
         Effects:
         Consumes the whole statement when successful. On error, prints an error
@@ -995,6 +1037,22 @@ class Parser:
         device_kind_result = self.parse_device_kind()
         if device_kind_result is None:
             return None
+
+        if self.symbol.type == self.scanner.DOT:
+            errormsg = "Device declarations cannot use ports with the '.' character."
+            errormsg += "\nIs this a connection statement in the wrong section?"
+            errormsg += self.section_typo_hint("CONNECT")
+            self.error(errormsg)
+            return False # return False because we're likely in the wrong section
+                         # so should stop parsing instead of allowing a cascade
+
+        if self.symbol.type == self.scanner.EQUALS:
+            errormsg = "Device declarations cannot use '='."
+            errormsg += "\nIs this a connection statement in the wrong section?"
+            errormsg += self.section_typo_hint("CONNECT")
+            self.error(errormsg)
+            return False # return False because we're likely in the wrong section
+                         # so should stop parsing instead of allowing a cascade
 
         device_names = self.parse_name_list(expected_name="device name")
         if device_names is None:
@@ -1013,15 +1071,21 @@ class Parser:
                 errormsg += "\nThis may be a connection statement in the wrong section."
                 errormsg += "\nDid you forget the CONNECT section keyword?"
                 errormsg += self.section_typo_hint("CONNECT")
+                self.error(errormsg)
+                return False # return False because we're likely in the wrong section
+                             # so should stop parsing instead of allowing a cascade
 
             elif self.symbol.type == self.scanner.DOT:
                 errormsg += "\nDevice declarations cannot use ports like '.I1'."
                 errormsg += "\nThis may be a connection statement in the wrong section."
                 errormsg += "\nDid you forget the CONNECT section keyword?"
                 errormsg += self.section_typo_hint("CONNECT")
+                self.error(errormsg)
+                return False # return False because we're likely in the wrong section
+                             # so should stop parsing instead of allowing a cascade
 
             self.error(errormsg, synchronize=True)
-            return None
+            return None 
 
         self.advance()
         return device_kind_symbol, device_kind_result, device_names
@@ -1343,7 +1407,9 @@ class Parser:
         must be followed by OUTPUTS.
         """
         if not self.is_keyword_name("INPUTS"):
-            self.error("Expected INPUTS section in module definition")
+            errormsg = "Expected INPUTS section in module definition"
+            errormsg += self.section_typo_hint("INPUTS")
+            self.error(errormsg)
             return None
         self.advance()
 
@@ -1379,9 +1445,9 @@ class Parser:
         must be followed by DEVICES.
         """
         if not self.is_keyword_name("OUTPUTS"):
-            self.error(
-                "Expected OUTPUTS section in module definition", synchronize=True
-            )
+            errormsg = "Expected OUTPUTS section in module definition"
+            errormsg += self.section_typo_hint("OUTPUTS")
+            self.error(errormsg)
             return None
         self.advance()
 
@@ -1424,6 +1490,8 @@ class Parser:
         first symbol of a device statement.
         """
         device_statement_result = self.parse_device_statement()
+        if device_statement_result is False:
+            return False
         if device_statement_result is None:
             return True
         _device_kind_symbol, device_kind_result, device_name_list = (
@@ -1488,8 +1556,8 @@ class Parser:
                 errormsg += self.section_typo_hint("CONNECT")
                 self.error(errormsg)
                 return False
-            self.parse_module_device(module_definition)
-        return
+            if not self.parse_module_device(module_definition):
+                return False
 
     # NETS section within module ##################################################
 
@@ -2466,6 +2534,8 @@ class Parser:
         # 1. Parse the device ebnf rule (syntax)
 
         device_statement_result = self.parse_device_statement()
+        if device_statement_result is False:
+            return False
         if device_statement_result is None:
             return True
         device_kind_symbol, device_kind_result, device_name_list = (
@@ -2551,7 +2621,8 @@ class Parser:
                 self.error(errormsg)
                 return False
 
-            self.parse_device()
+            if not self.parse_device():
+                return False
 
     #############################################################################################
     # PARSE AND BUILD CONNECTIONS
@@ -2946,11 +3017,25 @@ class Parser:
                 if connection_error_type == self.network.FIRST_DEVICE_ABSENT:
                     best_error_symbol = input_signal.main_symbol
                 elif connection_error_type == self.network.FIRST_PORT_ABSENT:
-                    best_error_symbol = input_signal.port_symbol
+                    if input_signal.port_symbol is None:
+                        error_message = (
+                            "Input port not specified on device with multiple input ports."
+                        )
+                        best_error_symbol = input_signal.main_symbol
+                    else:
+                        best_error_symbol = input_signal.port_symbol
+
                 elif connection_error_type == self.network.SECOND_DEVICE_ABSENT:
                     best_error_symbol = output_signal.main_symbol
+
                 elif connection_error_type == self.network.SECOND_PORT_ABSENT:
-                    best_error_symbol = output_signal.port_symbol
+                    if output_signal.port_symbol is None:
+                        error_message = (
+                            "Output port not specified on device with multiple output ports."
+                        )
+                        best_error_symbol = output_signal.main_symbol
+                    else:
+                        best_error_symbol = output_signal.port_symbol
                 elif (
                     connection_error_type == self.network.INPUT_CONNECTED
                     or connection_error_type == self.network.OUTPUT_TO_OUTPUT
@@ -3184,13 +3269,19 @@ class Parser:
             self.advance()
 
             while self.is_keyword_name("MODULE"):
-                self.parse_module_definition()
+                if not self.parse_module_definition():
+                    self.fatal_error()
+                    return False
                 if self.is_keyword_name("MODULE"):
                     continue
                 elif self.is_keyword_name("DEVICES"):
                     break
                 else:
                     # and next keyword isn't MODULE or DEVICES: fatal error
+                    errormsg = "Expected DEVICES section or new MODULE definition."
+                    errormsg += self.section_typo_hint("DEVICES")
+                    errormsg += self.section_typo_hint("MODULE")
+                    self.error(errormsg)
                     self.fatal_error()
                     return False
 
@@ -3281,11 +3372,25 @@ class Parser:
 
                 return False
 
+        except MemoryError:
+            print("---------------------------------------------------------------")
+            print("Error: The circuit is too large to fit in available memory.")
+            print(
+                "This may be caused by too many devices,"
+                "or module instantiations\nthat expand into a very large circuit."
+            )
+            print()
+            print("*** ERROR: Parsing stopped because the computer ran out of memory. ***\n")
+            print(
+                "Network not built. Simulation will not start until the definition "
+                "file is simplified."
+            )
+            return False
+
         except Exception:
             # FALLBACK ERROR MESSAGE - This should hopefully not ever be seen by the user!
             print("---------------------------------------------------------------")
             try:
-                self.error_count += 1
                 self.error(
                     "An unexpected error occurred - "
                     "please check the definition file")
