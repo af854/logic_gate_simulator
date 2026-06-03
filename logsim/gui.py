@@ -214,7 +214,7 @@ THEMES = {
     },
 }
 
-EXTERNAL_DOCUMENTATION_URL = ""
+EXTERNAL_DOCUMENTATION_URL = "https://ibrahim-nur.github.io/GF2"
 LIGHT_CLOSE_ICON_PATH = os.path.join(
     os.path.dirname(__file__), "icons", "x_icon_light.png"
 )
