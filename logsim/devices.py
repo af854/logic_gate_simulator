@@ -286,7 +286,6 @@ class Devices:
             if device.device_kind == self.D_TYPE:
                 device.dtype_memory = random.choice([self.LOW, self.HIGH])
                 device.outputs[self.Q_ID] = device.dtype_memory
-                print(device.dtype_memory)
                 device.outputs[self.QBAR_ID] = (
                     self.HIGH if device.dtype_memory == self.LOW else self.LOW
                 )
