@@ -121,13 +121,15 @@ LIVE_TRACE_BUTTON_SIZE = 28
 LIVE_TRACE_SPEED_BUTTON_WIDTH = 30
 CYCLE_SPIN_WIDTH = 88
 SIDE_PANEL_WIDTH = 180
-SIMULATION_PANEL_WIDTH = 190
+SIMULATION_PANEL_WIDTH = 210
 MODULE_NESTED_INDENT_WIDTH = 12
 MODULE_SIGNAL_INDENT_WIDTH = 16
 SIGNAL_ACTION_BUTTON_SIZE = 18
+SIGNAL_ACTION_COLUMN_WIDTH = 24
 SIGNAL_LABEL_MIN_WIDTH = 64
 COLLAPSIBLE_PANE_STYLE = wx.CP_DEFAULT_STYLE | wx.CP_NO_TLW_RESIZE
 HIERARCHY_GUIDE_WIDTH = 14
+MODULE_PANE_GAP = 8
 
 
 THEMES = {
@@ -2672,6 +2674,9 @@ class Gui(wx.Frame):
                 continue
             pane_label = module_name + " internals"
             collapsible_pane = wx.CollapsiblePane(parent, wx.ID_ANY, pane_label, style=COLLAPSIBLE_PANE_STYLE)
+            pane_font = collapsible_pane.GetFont()
+            pane_font.SetWeight(wx.FONTWEIGHT_BOLD)
+            collapsible_pane.SetFont(pane_font)
             self.set_collapsible_pane_colours(collapsible_pane)
             pane = collapsible_pane.GetPane()
             pane.SetBackgroundColour(self.theme["panel_bg"])
@@ -2699,7 +2704,7 @@ class Gui(wx.Frame):
             if parent_path:
                 pane_row_sizer.AddSpacer(MODULE_NESTED_INDENT_WIDTH)
             pane_row_sizer.Add(collapsible_pane, 1, wx.EXPAND)
-            parent_sizer.Add(pane_row_sizer, 0, wx.EXPAND | wx.ALL, 4)
+            parent_sizer.Add(pane_row_sizer, 0, wx.EXPAND | wx.TOP | wx.BOTTOM | wx.LEFT | wx.RIGHT, MODULE_PANE_GAP)
 
     def store_module_signal_pane_state(self):
         """Remember which module panes are expanded before rebuilding."""
@@ -2720,9 +2725,7 @@ class Gui(wx.Frame):
         label_font.SetPointSize(max(1, label_font.GetPointSize() - 1))
         label.SetFont(label_font)
 
-        # row always has one button
-        # Its label and handler are set by update_available_signal_button() depending on whether the signal is already monitored
-        action_button = wxbuttons.GenBitmapButton(parent, wx.ID_ANY, wx.Bitmap(1, 1),size=(SIGNAL_ACTION_BUTTON_SIZE, SIGNAL_ACTION_BUTTON_SIZE), style=wx.BORDER_NONE)
+        action_button = wxbuttons.GenBitmapButton(parent, wx.ID_ANY, wx.Bitmap(1, 1), size=(SIGNAL_ACTION_BUTTON_SIZE, SIGNAL_ACTION_BUTTON_SIZE), style=wx.BORDER_NONE)
         action_button.SetMinSize((SIGNAL_ACTION_BUTTON_SIZE, SIGNAL_ACTION_BUTTON_SIZE))
         action_button.SetMaxSize((SIGNAL_ACTION_BUTTON_SIZE, SIGNAL_ACTION_BUTTON_SIZE))
         self.module_signal_button_names[action_button.GetId()] = signal_name
@@ -2731,8 +2734,11 @@ class Gui(wx.Frame):
 
         if indent > 0:
             row_sizer.AddSpacer(indent)
-        row_sizer.Add(label, 1, wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, 4)
-        row_sizer.Add(action_button, 0)
+        action_column_sizer = wx.BoxSizer(wx.HORIZONTAL)
+        action_column_sizer.SetMinSize((SIGNAL_ACTION_COLUMN_WIDTH, SIGNAL_ACTION_BUTTON_SIZE))
+        action_column_sizer.Add(action_button, 0, wx.ALIGN_CENTER_VERTICAL)
+        row_sizer.Add(action_column_sizer, 0, wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, 4)
+        row_sizer.Add(label, 1, wx.ALIGN_CENTER_VERTICAL)
         parent_sizer.Add(row_sizer, 0, wx.EXPAND | wx.ALL, 4)
 
     def update_available_signal_button(self, button, signal_name):
@@ -2833,7 +2839,6 @@ class Gui(wx.Frame):
 
     def set_switch_value(self, switch_name, switch_value):
         """Set one switch to LOW or HIGH."""
-        self.stop_live_trace()
         switch_id = self.names.query(switch_name)
 
         if switch_id is None:
