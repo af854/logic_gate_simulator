@@ -1,14 +1,14 @@
 # Project GF2: Logic Simulator
 
-GF2 is a Python logic simulator for both combinatorial and clocked digital circuits. It reads a simple text-based circuit definition file, constructs the corresponding network, and then lets the user interact with that network either through a graphical interface or a command-line session.
+GF2 is a Python logic simulator for digital circuits. It reads a simple text-based circuit definition file, constructs the corresponding network, and then lets the user interact with that network either through a graphical interface or a command-line session.
 
-The simulator is designed to make it easy to define devices such as `CLOCK`, `SWITCH`, `AND`, `NAND`, `OR`, `NOR`, `XOR`, `DTYPE`, and `MODULE`, and to connect them using named nets. It supports signal monitoring, waveform tracing and step-by-step execution of simulation cycles.
+The simulator is designed to make it easy to define various devices, including `CLOCK`, `SWITCH`, `AND`, `NAND`, `OR`, `NOR`, `XOR`, `DTYPE`, and `MODULE`, and to connect them using named nets. It supports signal monitoring, waveform tracing and step-by-step execution of simulation cycles.
 
 ## Getting started
 
 ### Prerequisites
 
-- Python 3.8 or later
+- Python 3.6 or later
 - `wxPython` for the graphical user interface
 - `PyOpenGL` for waveform rendering
 - `pytest` for running the unit tests
@@ -43,7 +43,7 @@ If you run `python logsim.py` without a file path, the GUI starts with a blank s
 
 Circuit files are written in a custom text format that describes devices and connections in sections such as `DEVICES`, `NETS`, `CONNECT`, and `MONITOR`.
 
-The parser uses an EBNF grammar defined in `logsim/syntax.ebnf` and a fallback grammar in `logsim/fallback/fallback_syntax.ebnf`. This grammar governs the recognised keywords, identifiers, punctuation and comment styles.
+The parser uses an EBNF grammar defined in `logsim/syntax.ebnf`. This grammar governs the recognised keywords, identifiers, punctuation and comment styles.
 
 ## Project organisation
 
