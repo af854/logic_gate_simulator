@@ -25,9 +25,10 @@ jobs:
         run: pip install -r requirements.txt
 
       - name: Install gui dependencies
-        run: 
-          pip install wxPython
+        run: |
+          pip install sphinx
           pip install PyOpenGL
+          pip install -U -f https://extras.wxpython.org/wxPython4/extras/linux/gtk3/ubuntu-22.04 wxPython
 
       - name: Build Sphinx Documentation
         run: sphinx-build -b html docs/source docs/build/html
