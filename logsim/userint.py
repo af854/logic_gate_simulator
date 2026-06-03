@@ -136,7 +136,7 @@ class UserInterface:
         if not self.character.isalpha():  # the string must start with a letter
             print("Error! Expected a name.")
             return None
-        while self.character.isalnum():
+        while self.character.isalnum() or self.character == "_":
             name_string = "".join([name_string, self.character])
             self.get_character()
         return name_string

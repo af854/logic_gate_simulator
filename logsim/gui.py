@@ -2417,7 +2417,6 @@ class Gui(wx.Frame):
             return None
 
         device_name = name_parts[0]
-        # now can also be a net 
         device_id = self.names.query(device_name)
         if device_id is None:
             return None
@@ -2429,15 +2428,51 @@ class Gui(wx.Frame):
             if port_id is None:
                 return None
 
-        # Resolve the net to its driver based on net_driver_dict
+        # Resolve module-port display names back to internal net names.
+        # The parser internal net names resolve input and output ports
+        # within modules as nets, so TL_CTRL.GREEN port is internally
+        # kept as TL_CTRL->GREEN net. In the GUI we want to display
+        # TL_CTRL.GREEN, so get_output_signal_names converted everything
+        # to the dot form TL_CTRL.GREEN. Now when we are getting the
+        # signal IDs, convert back to parser internal net names
+        # which are in the net_driver_dict. 
+        # Example:
+        #   TL_CTRL.GREEN       -> TL_CTRL->GREEN
+        #   TL_CTRL->TIMER.Q0   -> TL_CTRL->TIMER->Q0
+        if port_id is not None:
+            internal_net_name = device_name + "->" + port_name
+            internal_net_id = self.names.query(internal_net_name)
+
+            if internal_net_id in self.net_driver_dict:
+                driver_signal = self.net_driver_dict[internal_net_id]
+
+                if driver_signal.is_literal:
+                    const_device_id = self.names.query(
+                        "@LITERAL_" + str(driver_signal.literal_value)
+                    )
+                    if const_device_id is None:
+                        return None
+                    return [const_device_id, None]
+
+                return [driver_signal.main_id, driver_signal.port_id]
+
+        # Resolve ordinary net names to their driver.
         if port_id is None and device_id in self.net_driver_dict:
             driver_signal = self.net_driver_dict[device_id]
+            if driver_signal.is_literal:
+                const_device_id = self.names.query(
+                    "@LITERAL_" + str(driver_signal.literal_value)
+                )
+                if const_device_id is None:
+                    return None
+                return [const_device_id, None]
+
             return [driver_signal.main_id, driver_signal.port_id]
 
         return [device_id, port_id]
 
     def get_output_signal_names(self):
-        """Return names for all output signals in the network."""
+        """Return GUI-facing names for all output signals in the network."""
         signal_names = []
 
         # Populate the monitor dropdown from real device outputs only
@@ -2459,6 +2494,18 @@ class Gui(wx.Frame):
             if signal_name is not None:
                 if signal_name.startswith("@"):
                     continue
+                # In the GUI,
+                # Display module port nets using dot notation:
+                #   TL_CTRL->GREEN       becomes TL_CTRL.GREEN
+                #   TL_CTRL->TIMER->Q0   becomes TL_CTRL->TIMER.Q0
+                #
+                # Existing real device outputs already contain dots, e.g.
+                #   TL_CTRL->TIMER->R0.Q
+                # so leave those unchanged.
+                if "->" in signal_name and "." not in signal_name:
+                    instance_name, port_name = signal_name.rsplit("->", 1)
+                    signal_name = instance_name + "." + port_name
+
                 signal_names.append(signal_name)
 
         return signal_names
@@ -2579,8 +2626,8 @@ class Gui(wx.Frame):
         for module_name in sorted(signal_group):
             if module_name == "signals_at_this_level":
                 continue
-
-            collapsible_pane = wx.CollapsiblePane(parent, wx.ID_ANY, module_name, style=COLLAPSIBLE_PANE_STYLE)
+            pane_label = module_name + " internals"
+            collapsible_pane = wx.CollapsiblePane(parent, wx.ID_ANY, pane_label, style=COLLAPSIBLE_PANE_STYLE)
             self.set_collapsible_pane_colours(collapsible_pane)
             pane = collapsible_pane.GetPane()
             pane.SetBackgroundColour(self.theme["panel_bg"])
