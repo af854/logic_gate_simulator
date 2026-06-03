@@ -24,13 +24,13 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
-      - name: Build Sphinx Documentation
-        run: sphinx-build -b html docs/source docs/build/html
-        
       - name: Install gui dependencies
         run: 
           pip install wxPython
           pip install PyOpenGL
+
+      - name: Build Sphinx Documentation
+        run: sphinx-build -b html docs/source docs/build/html
 
       - name: Upload Artifact
         uses: actions/upload-pages-artifact@v3
