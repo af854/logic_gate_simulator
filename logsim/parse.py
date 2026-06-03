@@ -44,8 +44,8 @@ MAX_MODULE_INSTANTIATION_DEPTH = 20
 #    the object if successful, and None if unsuccessful (after which
 #    it also leaves the parser in a synchronized state). In some cases
 #    these functions may return False instead of None - this means
-#    the parser is lost (e.g. likely missing keyword) 
-#    and further parsing should be aborted. 
+#    the parser is lost (e.g. likely missing keyword)
+#    and further parsing should be aborted.
 #
 #    - Parsing functions that only parse without returning an object
 #    return True if the parser is still in a known state (regardless
@@ -630,10 +630,10 @@ class Parser:
             )
             hint = self.name_typo_hint(bad_name_id, module_port_ids, "module's port")
         return hint
-        
+
     def device_kind_typo_hint(self, bad_kind_id):
         """Return string containing typo hint for device kinds and module types.
-        
+
         Arguments:
         bad_kind_id: name ID found that doesn't match device kind or module type
         """
@@ -710,7 +710,7 @@ class Parser:
         found where a name was expected. This is mainly for recovery in lists.
         expected_name -- description of the expected name, used only to improve the
         error message.
- 
+
         Return the parsed Symbol object if successful, or None otherwise.
 
         Effects:
@@ -969,10 +969,10 @@ class Parser:
                     return None
                 return "module", module_name_id, None
 
-            # We've got a name that's not a module type 
+            # We've got a name that's not a module type
             # Display a relevant error msg
             errormsg = "Expected primitive device type (e.g. AND) " \
-                    "or previously-defined module name"
+                       "or previously-defined module name"
 
             errormsg += self.device_kind_typo_hint(self.symbol.id)
             errormsg += self.section_typo_hint("NETS")
@@ -997,8 +997,23 @@ class Parser:
             if self.symbol.type != self.scanner.NUMBER:
                 self.error("Expected number", synchronize=True)
                 return None
+
+            bad_parameter_symbol = self.symbol
             device_parameter = self.symbol.id
             self.advance()  # consume the number
+
+            if device_kind_id == self.devices.CLOCK and device_parameter < 1:
+                self.error("Invalid device parameter: should be 1 or greater",
+                           bad_parameter_symbol, synchronize=True)
+                return None
+            if device_kind_id in self.devices.gate_types and not 1 <= device_parameter <= 16:
+                self.error("Invalid device parameter: should be between 1 and 16",
+                           bad_parameter_symbol, synchronize=True)
+                return None
+            if device_kind_id == self.devices.SWITCH and device_parameter not in [0, 1]:
+                self.error("Invalid device parameter: should be 0 or 1",
+                           bad_parameter_symbol, synchronize=True)
+                return None
 
             if self.symbol.type != self.scanner.R_BRACKET:
                 self.error("Expected ')'", synchronize=True)
@@ -1010,6 +1025,12 @@ class Parser:
         if self.is_fixed_device():
             device_kind_id = self.symbol.id
             self.advance()  # consume the device type like XOR
+            if self.symbol.type == self.scanner.L_BRACKET:
+                self.error(
+                    "This device kind should not have a parameter",
+                    synchronize=True,
+                )
+                return None
             return "primitive", device_kind_id, None
 
         self.error("Invalid device kind.", synchronize=True)
@@ -1021,7 +1042,7 @@ class Parser:
         EBNF: device_kind, name_list, ';'.
 
         Return a tuple (device_kind_symbol, device_kind_result, device_names) if
-        successful, or None on error. Return False on error and if the parser is 
+        successful, or None on error. Return False on error and if the parser is
         likely lost due to structural issues in the file.
 
         Effects:
@@ -1043,16 +1064,18 @@ class Parser:
             errormsg += "\nIs this a connection statement in the wrong section?"
             errormsg += self.section_typo_hint("CONNECT")
             self.error(errormsg)
-            return False # return False because we're likely in the wrong section
-                         # so should stop parsing instead of allowing a cascade
+            # return False because we're likely in the wrong section
+            # so should stop parsing instead of allowing a cascade
+            return False
 
         if self.symbol.type == self.scanner.EQUALS:
             errormsg = "Device declarations cannot use '='."
             errormsg += "\nIs this a connection statement in the wrong section?"
             errormsg += self.section_typo_hint("CONNECT")
             self.error(errormsg)
-            return False # return False because we're likely in the wrong section
-                         # so should stop parsing instead of allowing a cascade
+            # return False because we're likely in the wrong section
+            # so should stop parsing instead of allowing a cascade
+            return False
 
         device_names = self.parse_name_list(expected_name="device name")
         if device_names is None:
@@ -1072,8 +1095,9 @@ class Parser:
                 errormsg += "\nDid you forget the CONNECT section keyword?"
                 errormsg += self.section_typo_hint("CONNECT")
                 self.error(errormsg)
-                return False # return False because we're likely in the wrong section
-                             # so should stop parsing instead of allowing a cascade
+                # return False because we're likely in the wrong section
+                # so should stop parsing instead of allowing a cascade
+                return False
 
             elif self.symbol.type == self.scanner.DOT:
                 errormsg += "\nDevice declarations cannot use ports like '.I1'."
@@ -1081,11 +1105,12 @@ class Parser:
                 errormsg += "\nDid you forget the CONNECT section keyword?"
                 errormsg += self.section_typo_hint("CONNECT")
                 self.error(errormsg)
-                return False # return False because we're likely in the wrong section
-                             # so should stop parsing instead of allowing a cascade
+                # return False because we're likely in the wrong section
+                # so should stop parsing instead of allowing a cascade
+                return False
 
             self.error(errormsg, synchronize=True)
-            return None 
+            return None
 
         self.advance()
         return device_kind_symbol, device_kind_result, device_names
