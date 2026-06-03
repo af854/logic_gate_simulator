@@ -1,7 +1,7 @@
 Syntax specification
 ========================================
 
-This document describes the GF2 circuit definition language using the simulator's
+This document describes the logic simulator's circuit definition language using the simulator's
 formal grammar. It is unlikely that you will have coded with this grammar before. The
 format is straightforward: the scanner recognises names, numbers and symbols,
 then the parser checks that the file follows the grammar rules shown here.
@@ -238,7 +238,7 @@ Notes
 Formal grammar summary
 ----------------------
 
-The formal grammar rules are:
+The formal grammar rules in Extended Backus-Naur Form, or EBNF, are:
 
 .. code-block:: text
 

@@ -6,14 +6,18 @@
 GF2 Logic Simulator documentation
 =================================
 
-welcome to gf2 run by the best team
+This documentation describes the GF2 Logic Simulator and explains how to use it.
+It provides an overview of the simulator, the circuit definition language and
+the project organisation.
 
-we have fire documentation
+The user guide contains practical instructions for running the simulator and
+working with the example definition files. The syntax specification documents
+the file grammar in a way that is friendly for readers who have not used EBNF
+before.
 
-and indestructible code
-
-please browse to your heart's content
-
+Further pages describe the simulator subsystems: devices, the graphical
+interface, monitors, network execution, parser implementation, scanner behaviour
+and the text-based user interface.
 
 .. toctree::
    :maxdepth: 2
