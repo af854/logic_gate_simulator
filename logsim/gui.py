@@ -109,20 +109,22 @@ ID_SHOW_CONSOLE = wx.NewIdRef()
 
 
 MAX_RUN_CYCLES = 1000
-LIVE_TRACE_INTERVAL_MS = 400
+LIVE_TRACE_INTERVAL_MS = 500
 LIVE_TRACE_SPEEDS = [("1x", 1.0), ("1.5x", 1.5), ("2x", 2.0)]
 MIN_FRAME_WIDTH = 900
 MIN_FRAME_HEIGHT = 650
 SIMULATION_CONTROL_WIDTH = 140
+COMMAND_BUTTON_HEIGHT = 24
 CYCLES_COMPLETED_WIDTH = 140
 CYCLE_INSPECTOR_ENTRY_WIDTH = 90
-LIVE_TRACE_BUTTON_SIZE = 34
-LIVE_TRACE_SPEED_BUTTON_WIDTH = 36
+LIVE_TRACE_BUTTON_SIZE = 28
+LIVE_TRACE_SPEED_BUTTON_WIDTH = 30
 CYCLE_SPIN_WIDTH = 88
 SIDE_PANEL_WIDTH = 180
+SIMULATION_PANEL_WIDTH = 190
 MODULE_NESTED_INDENT_WIDTH = 12
 MODULE_SIGNAL_INDENT_WIDTH = 16
-SIGNAL_ACTION_BUTTON_WIDTH = 72
+SIGNAL_ACTION_BUTTON_SIZE = 18
 SIGNAL_LABEL_MIN_WIDTH = 64
 COLLAPSIBLE_PANE_STYLE = wx.CP_DEFAULT_STYLE | wx.CP_NO_TLW_RESIZE
 HIERARCHY_GUIDE_WIDTH = 14
@@ -192,6 +194,10 @@ LIGHT_PLAY_ICON_PATH = os.path.join(os.path.dirname(__file__), "icons", "play_li
 DARK_PLAY_ICON_PATH = os.path.join(os.path.dirname(__file__), "icons", "play_dark.png")
 LIGHT_PAUSE_ICON_PATH = os.path.join(os.path.dirname(__file__), "icons", "pause_light.png")
 DARK_PAUSE_ICON_PATH = os.path.join(os.path.dirname(__file__), "icons", "pause_dark.png")
+LIGHT_ADD_ICON_PATH = os.path.join(os.path.dirname(__file__), "icons", "add_light.png")
+DARK_ADD_ICON_PATH = os.path.join(os.path.dirname(__file__), "icons", "add_dark.png")
+LIGHT_REMOVE_ICON_PATH = os.path.join(os.path.dirname(__file__), "icons", "remove_light.png")
+DARK_REMOVE_ICON_PATH = os.path.join(os.path.dirname(__file__), "icons", "remove_dark.png")
 
 
 def add_signal_to_module_tree(module_tree, full_signal_name, value):
@@ -317,7 +323,7 @@ class MyGLCanvas(wxcanvas.GLCanvas):
         # Clear everything
         GL.glClear(GL.GL_COLOR_BUFFER_BIT)
 
-        size = self.GetClientSize()
+        size = self.get_render_size()
 
         if not self.monitors.monitors_dictionary:
             self.render_text(
@@ -369,11 +375,13 @@ class MyGLCanvas(wxcanvas.GLCanvas):
                 if display_row["kind"] == "heading":
                     # heading labels a module
                     # It doesn't have a trace so only draw the text and then move down by its height
-                    self.render_text(display_row["label"], 10, low_y + amplitude / 2 - 4, colour=self.theme["canvas_muted"])
+                    label_text = self.get_canvas_label_text(display_row["label"], start_x)
+                    self.render_text(label_text, 10, low_y + amplitude / 2 - 4, colour=self.theme["canvas_muted"])
                     row_position += display_row["height"]
                     continue
 
-                self.render_text(display_row["label"], 10, low_y + amplitude / 2 - 4, colour=self.theme["canvas_text"])
+                label_text = self.get_canvas_label_text(display_row["label"], start_x)
+                self.render_text(label_text, 10, low_y + amplitude / 2 - 4, colour=self.theme["canvas_text"])
                 self.draw_value_axis(start_x, low_y, high_y, step, max_trace_length)
 
                 # Draw the actual signal trace on top of the axes and grid
@@ -458,7 +466,7 @@ class MyGLCanvas(wxcanvas.GLCanvas):
     def zoom_at_canvas_centre(self, factor):
         """Zoom around the centre of the canvas."""
         # Find the centre of thw canvas
-        size = self.GetClientSize()
+        size = self.get_render_size()
         centre_x = size.width / 2
         centre_y = size.height / 2
         object_x = (centre_x - self.pan_x) / self.zoom
@@ -627,6 +635,19 @@ class MyGLCanvas(wxcanvas.GLCanvas):
             else:
                 GLUT.glutBitmapCharacter(font, ord(character))
 
+    def get_canvas_label_text(self, label_text, start_x):
+        """Shorten a canvas label if it would run into the waveform."""
+        label_margin = 30
+        average_character_width = 8
+        available_width = start_x - label_margin
+        max_characters = int(available_width / average_character_width)
+
+        if max_characters < 4:
+            return "..."
+        if len(label_text) <= max_characters:
+            return label_text
+        return label_text[:max_characters - 3] + "..."
+
     def get_monitor_display_rows(self):
         """Return grouped rows for waveform monitor labels and traces."""
         rows = []
@@ -716,7 +737,7 @@ class MyGLCanvas(wxcanvas.GLCanvas):
 
     def get_waveform_layout(self, display_rows=None):
         """Return horizontal waveform layout values used by drawing and controls."""
-        size = self.GetClientSize()
+        size = self.get_render_size()
         if display_rows is None:
             display_rows = self.get_monitor_display_rows()
 
@@ -915,6 +936,9 @@ class Gui(wx.Frame):
         """Initialise widgets and layout."""
         # Create the main window and set its starting size
         super().__init__(parent=None, title=title, size=(1200, 750))
+        base_font = self.GetFont()
+        base_font.SetPointSize(max(1, base_font.GetPointSize() - 1))
+        self.SetFont(base_font)
 
         # Initialise instances of the four inner simulator classes
         self.path = path
@@ -1011,21 +1035,31 @@ class Gui(wx.Frame):
         self.live_trace_timer = wx.Timer(self)
         self.cycles_completed_text.SetMinSize((CYCLES_COMPLETED_WIDTH, -1))
         self.cycles_completed_text.SetMaxSize((CYCLES_COMPLETED_WIDTH, -1))
-        self.run_cycles_button.SetMinSize((SIMULATION_CONTROL_WIDTH, -1))
+        self.run_cycles_button.SetMinSize((SIMULATION_CONTROL_WIDTH, COMMAND_BUTTON_HEIGHT))
+        self.run_cycles_button.SetInitialSize((SIMULATION_CONTROL_WIDTH, COMMAND_BUTTON_HEIGHT))
+        self.run_cycles_button.SetMaxSize((-1, COMMAND_BUTTON_HEIGHT))
         self.live_trace_button.SetMinSize((LIVE_TRACE_BUTTON_SIZE, LIVE_TRACE_BUTTON_SIZE))
         self.live_trace_speed_button.SetMinSize((LIVE_TRACE_SPEED_BUTTON_WIDTH, LIVE_TRACE_BUTTON_SIZE))
         self.live_trace_speed_button.SetMaxSize((LIVE_TRACE_SPEED_BUTTON_WIDTH, LIVE_TRACE_BUTTON_SIZE))
-        self.reset_button.SetMinSize((SIMULATION_CONTROL_WIDTH, -1))
-        self.clear_traces_button.SetMinSize((SIMULATION_CONTROL_WIDTH, -1))
+        self.reset_button.SetMinSize((SIMULATION_CONTROL_WIDTH, COMMAND_BUTTON_HEIGHT))
+        self.reset_button.SetInitialSize((SIMULATION_CONTROL_WIDTH, COMMAND_BUTTON_HEIGHT))
+        self.reset_button.SetMaxSize((-1, COMMAND_BUTTON_HEIGHT))
+        self.clear_traces_button.SetMinSize((SIMULATION_CONTROL_WIDTH, COMMAND_BUTTON_HEIGHT))
+        self.clear_traces_button.SetInitialSize((SIMULATION_CONTROL_WIDTH, COMMAND_BUTTON_HEIGHT))
+        self.clear_traces_button.SetMaxSize((-1, COMMAND_BUTTON_HEIGHT))
         self.live_trace_button.SetMaxSize((LIVE_TRACE_BUTTON_SIZE, LIVE_TRACE_BUTTON_SIZE))
         self.console_box = wx.TextCtrl(self, wx.ID_ANY, "", style=wx.TE_MULTILINE | wx.TE_READONLY)
         self.console_box.SetMinSize((-1, 90))
         self.clear_status_button = wx.Button(self, wx.ID_ANY, "Clear console")
+        self.clear_status_button.SetMinSize((-1, COMMAND_BUTTON_HEIGHT))
+        self.clear_status_button.SetInitialSize((-1, COMMAND_BUTTON_HEIGHT))
+        self.clear_status_button.SetMaxSize((-1, COMMAND_BUTTON_HEIGHT))
         self.cycle_inspector_panel = wx.Panel(self, wx.ID_ANY)
         self.cycle_inspector_label = wx.StaticText(self.cycle_inspector_panel, wx.ID_ANY, "Cycle:")
         self.cycle_inspector_entry = wx.TextCtrl(self.cycle_inspector_panel, wx.ID_ANY, "-", style=wx.TE_PROCESS_ENTER)
         self.cycle_inspector_entry.SetMinSize((CYCLE_INSPECTOR_ENTRY_WIDTH, -1))
         self.cycle_inspector_entry.SetMaxSize((CYCLE_INSPECTOR_ENTRY_WIDTH, -1))
+        self.cycle_inspector_entry.SetInitialSize((CYCLE_INSPECTOR_ENTRY_WIDTH, -1))
         self.cycle_inspector_slider = wx.Slider(self.cycle_inspector_panel, wx.ID_ANY, 0, 0, 1, style=wx.SL_HORIZONTAL)
         self.cycle_inspector_panel.Hide()
         self.undo_button = wxbuttons.GenBitmapButton(self, wx.ID_ANY, wx.Bitmap(1, 1), size=(28, 28), style=wx.BORDER_NONE)
@@ -1142,7 +1176,7 @@ class Gui(wx.Frame):
         self.section_close_buttons = {}
 
         simulation_panel, simulation_sizer = self.create_section_panel("Simulation", "simulation")
-        simulation_panel.SetMinSize((SIDE_PANEL_WIDTH, -1))
+        simulation_panel.SetMinSize((SIMULATION_PANEL_WIDTH, -1))
         self.spin = wx.SpinCtrl(simulation_panel, wx.ID_ANY, "10")
         self.spin.SetRange(1, MAX_RUN_CYCLES)
         self.spin.SetMinSize((CYCLE_SPIN_WIDTH, -1))
@@ -1180,7 +1214,7 @@ class Gui(wx.Frame):
 
         inspector_sizer = wx.BoxSizer(wx.HORIZONTAL)
         inspector_sizer.Add(self.cycle_inspector_label, 0, wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, 4)
-        inspector_sizer.Add(self.cycle_inspector_entry, 0, wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, 8)
+        inspector_sizer.Add(self.cycle_inspector_entry, 0, wx.ALIGN_CENTER_VERTICAL | wx.RIGHT | wx.FIXED_MINSIZE, 8)
         self.cycle_inspector_slider.SetMinSize((120, -1))
         inspector_sizer.Add(self.cycle_inspector_slider, 1, wx.EXPAND)
         self.cycle_inspector_panel.SetSizer(inspector_sizer)
@@ -1436,6 +1470,8 @@ class Gui(wx.Frame):
         self.cycle_inspector_entry.SetMinSize((CYCLE_INSPECTOR_ENTRY_WIDTH, -1))
         if hasattr(self.cycle_inspector_entry, "SetMaxSize"):
             self.cycle_inspector_entry.SetMaxSize((CYCLE_INSPECTOR_ENTRY_WIDTH, -1))
+        if hasattr(self.cycle_inspector_entry, "SetInitialSize"):
+            self.cycle_inspector_entry.SetInitialSize((CYCLE_INSPECTOR_ENTRY_WIDTH, -1))
         if hasattr(self, "cycle_inspector_panel"):
             self.cycle_inspector_panel.Layout()
 
@@ -2098,6 +2134,12 @@ class Gui(wx.Frame):
 
     def load_icon_bitmap(self, icon_path, size):
         """Return a scaled bitmap for an icon path, or None if it cannot load."""
+        cache_key = (icon_path, size)
+        if not hasattr(self, "icon_bitmap_cache"):
+            self.icon_bitmap_cache = {}
+        if cache_key in self.icon_bitmap_cache:
+            return self.icon_bitmap_cache[cache_key]
+
         if not os.path.exists(icon_path):
             return None
 
@@ -2106,7 +2148,9 @@ class Gui(wx.Frame):
             return None
 
         image = image.Scale(size, size, wx.IMAGE_QUALITY_HIGH)
-        return wx.Bitmap(image)
+        bitmap = wx.Bitmap(image)
+        self.icon_bitmap_cache[cache_key] = bitmap
+        return bitmap
 
     def apply_history_button_theme(self, button, icon_path, tooltip):
         """Apply icon and colours to an undo or redo button."""
@@ -2672,12 +2716,15 @@ class Gui(wx.Frame):
         label.SetMinSize((SIGNAL_LABEL_MIN_WIDTH, -1))
         label.SetToolTip(signal_name)
         label.SetForegroundColour(self.theme["text"])
+        label_font = label.GetFont()
+        label_font.SetPointSize(max(1, label_font.GetPointSize() - 1))
+        label.SetFont(label_font)
 
         # row always has one button
         # Its label and handler are set by update_available_signal_button() depending on whether the signal is already monitored
-        action_button = wx.Button(parent, wx.ID_ANY, "")
-        action_button.SetMinSize((SIGNAL_ACTION_BUTTON_WIDTH, 23))
-        action_button.SetMaxSize((SIGNAL_ACTION_BUTTON_WIDTH, 23))
+        action_button = wxbuttons.GenBitmapButton(parent, wx.ID_ANY, wx.Bitmap(1, 1),size=(SIGNAL_ACTION_BUTTON_SIZE, SIGNAL_ACTION_BUTTON_SIZE), style=wx.BORDER_NONE)
+        action_button.SetMinSize((SIGNAL_ACTION_BUTTON_SIZE, SIGNAL_ACTION_BUTTON_SIZE))
+        action_button.SetMaxSize((SIGNAL_ACTION_BUTTON_SIZE, SIGNAL_ACTION_BUTTON_SIZE))
         self.module_signal_button_names[action_button.GetId()] = signal_name
         self.module_signal_action_buttons[signal_name] = action_button
         self.update_available_signal_button(action_button, signal_name)
@@ -2697,16 +2744,36 @@ class Gui(wx.Frame):
         if self.is_signal_monitored(signal_name):
             action_label = "Remove"
             action_handler = self.on_delete_module_signal_button
-            button_background = self.theme["toggle_off"]
+            if getattr(self, "theme_name", "light") == "dark":
+                icon_path = DARK_REMOVE_ICON_PATH
+            else:
+                icon_path = LIGHT_REMOVE_ICON_PATH
         else:
             action_label = "Add"
             action_handler = self.on_add_module_signal_button
-            button_background = self.theme["toggle_on"]
+            if getattr(self, "theme_name", "light") == "dark":
+                icon_path = DARK_ADD_ICON_PATH
+            else:
+                icon_path = LIGHT_ADD_ICON_PATH
 
-        button.SetLabel(action_label)
-        button.SetBackgroundColour(button_background)
-        button.SetForegroundColour(self.theme["toggle_text"])
+        button.SetToolTip(action_label)
+        button.SetBackgroundColour(self.theme["panel_bg"])
+        button.SetForegroundColour(self.theme["text"])
+        if hasattr(button, "SetBezelWidth"):
+            button.SetBezelWidth(0)
+        if hasattr(button, "SetMargins"):
+            button.SetMargins(0, 0)
+        if hasattr(button, "SetUseFocusIndicator"):
+            button.SetUseFocusIndicator(False)
+
+        bitmap = self.load_icon_bitmap(icon_path, 12)
+        if bitmap is not None and hasattr(button, "SetBitmapLabel"):
+            button.SetLabel("")
+            button.SetBitmapLabel(bitmap)
+        else:
+            button.SetLabel(action_label)
         button.Bind(wx.EVT_BUTTON, action_handler)
+        button.Bind(wx.EVT_LEFT_DOWN, action_handler)
         button.Refresh()
 
     def is_signal_monitored(self, signal_name):
