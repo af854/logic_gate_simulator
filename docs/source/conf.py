@@ -42,3 +42,5 @@ html_css_files = [
 html_js_files = [
     "custom.js",
 ]
+if os.environ.get("CI"):
+    autodoc_mock_imports = ["wx", "OpenGL"]
