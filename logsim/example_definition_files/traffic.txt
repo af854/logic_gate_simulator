@@ -8,12 +8,12 @@
  *  and all supported primitive devices. 
  *  
  *  Behaviour: 
- *      when ENABLE=1, the circuit should run, making
+ *      when EN=1, the circuit should run, making
  *      the output GREEN on for 4 cycles, then RED on for 2 cycles,
  *      indefinitely. The LEFT1 and LEFT0 outputs monitors display
  *      the 2-bit value of the amount of time left in each stage.
  * 
- *      When ENABLE=0, the circuit holds its current state.
+ *      When EN=0, the circuit holds its current state.
  *)
 
 ##################################################
@@ -118,7 +118,7 @@ ENDMODULE;
 (* 
     2-bit subtractor module using 2 full-adders
     Inputs:
-        - A1 A0 and B1 B0, to compute A-B0
+        - A1 A0 and B1 B0, to compute A-B
     Outputs:
         - S1 S0 (the result)
         - VALID (1 if no underflow occured, 0 otherwise)

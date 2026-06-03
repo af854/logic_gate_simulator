@@ -1,7 +1,9 @@
 """Test the GUI module.
 
-The real GUI uses wxPython and OpenGL so these tests will avoid opening an actual window to make the automated tests easy to run and reliable  
-Instead, small dummy classes are used for the parts of the GUI that would normally draw to the screen or update widgets etc.
+The real GUI uses wxPython and OpenGL so these tests will avoid opening an
+actual window to make the automated tests easy to run and reliable.
+Instead, small dummy classes are used for the parts of the GUI that would
+normally draw to the screen or update widgets etc.
 Hence we can test the logic in gui.py without needing to click buttons manually
 """
 
@@ -10,7 +12,15 @@ from types import SimpleNamespace
 import wx
 
 from devices import Devices
-from gui import Gui, MyGLCanvas, COLLAPSIBLE_PANE_STYLE, LIVE_TRACE_INTERVAL_MS, LIVE_TRACE_SPEEDS, MAX_RUN_CYCLES, THEMES
+from gui import (
+    Gui,
+    MyGLCanvas,
+    COLLAPSIBLE_PANE_STYLE,
+    LIVE_TRACE_INTERVAL_MS,
+    LIVE_TRACE_SPEEDS,
+    MAX_RUN_CYCLES,
+    THEMES,
+)
 from monitors import Monitors
 from names import Names
 from network import Network
@@ -19,7 +29,8 @@ from network import Network
 class DummyGui:
     """Replacement for the Gui class that does not open a window.
 
-    For these tests we only need a few of its methods, so this class borrows those methods but avoids all the window setup
+    For these tests we only need a few of its methods, so this class borrows
+    those methods but avoids all the window setup.
     """
 
     run_cycles = Gui.run_cycles
@@ -109,7 +120,8 @@ class DummyGui:
 class DummyCanvas:
     """Replacement for MyGLCanvas that does not use OpenGL.
 
-    some drawing helper methods are just calculations e.g. deciding where a signal should be drawn
+    Some drawing helper methods are just calculations e.g. deciding where a
+    signal should be drawn.
     Those calculations can be tested without creating an OpenGL canvas
     """
 
@@ -384,15 +396,18 @@ class DummySpin:
 def new_gui():
     """Return a DummyGui instance with a small working network.
 
-    The network has two visible switches connected to one OR gate  
-    It also has one hidden switch whose name starts with @ because the GUI is supposed to hide internal parser created signals from the user
+    The network has two visible switches connected to one OR gate
+    It also has one hidden switch whose name starts with @ because the GUI is
+    supposed to hide internal parser created signals from the user.
     """
     new_names = Names()
     new_devices = Devices(new_names)
     new_network = Network(new_names, new_devices)
     new_monitors = Monitors(new_names, new_devices, new_network)
 
-    [SW1_ID, SW2_ID, OR1_ID, HIDDEN_ID, I1, I2] = new_names.lookup(["Sw1", "Sw2", "Or1", "@hidden", "I1", "I2"])
+    [SW1_ID, SW2_ID, OR1_ID, HIDDEN_ID, I1, I2] = new_names.lookup(
+        ["Sw1", "Sw2", "Or1", "@hidden", "I1", "I2"]
+    )
 
     # Add 2 normal switches, 1 hidden switch, 1 OR gate
     new_devices.make_device(SW1_ID, new_devices.SWITCH, 0)
@@ -452,7 +467,8 @@ def add_dummy_cycle_inspector_widgets(gui):
 def test_get_switch_names(new_gui):
     """Test that only switches the user can see are shown in the switch list.
 
-    The hidden switch is still part of the circuit but the user should not see it in the GUI because it is an internal helper device
+    The hidden switch is still part of the circuit but the user should not see
+    it in the GUI because it is an internal helper device.
     """
     assert new_gui.get_switch_names() == ["Sw1", "Sw2"]
 
@@ -460,7 +476,7 @@ def test_get_switch_names(new_gui):
 def test_get_output_signal_names(new_gui):
     """Test that only output signals the user can see are shown for monitoring.
 
-    This is the list that would appear in the monitor dropdown box  
+    This is the list that would appear in the monitor dropdown box
     Internal names beginning with @ should be left out
     """
     assert new_gui.get_output_signal_names() == ["Sw1", "Sw2", "Or1"]
@@ -496,7 +512,11 @@ def test_run_cycles(new_gui):
     or1_monitor = new_gui.monitors.monitors_dictionary["Or1"]
     assert or1_monitor.device_id == OR1_ID
     assert or1_monitor.output_id is None
-    assert or1_monitor.trace == [new_gui.devices.HIGH, new_gui.devices.HIGH, new_gui.devices.HIGH]
+    assert or1_monitor.trace == [
+        new_gui.devices.HIGH,
+        new_gui.devices.HIGH,
+        new_gui.devices.HIGH,
+    ]
 
 
 def test_undo_cycle_restores_previous_state(new_gui):
@@ -504,7 +524,10 @@ def test_undo_cycle_restores_previous_state(new_gui):
     new_gui.run_cycles(2)
 
     assert new_gui.total_cycles_completed == 2
-    assert new_gui.monitors.monitors_dictionary["Or1"].trace == [new_gui.devices.HIGH, new_gui.devices.HIGH]
+    assert new_gui.monitors.monitors_dictionary["Or1"].trace == [
+        new_gui.devices.HIGH,
+        new_gui.devices.HIGH,
+    ]
 
     new_gui.on_undo_cycle(None)
 
@@ -527,7 +550,10 @@ def test_redo_cycle_restores_undone_state(new_gui):
     assert new_gui.cycles_completed == 2
     assert new_gui.switch_rows_refreshed == 2
     assert new_gui.switch_rows_rebuilt == 0
-    assert new_gui.monitors.monitors_dictionary["Or1"].trace == [new_gui.devices.HIGH, new_gui.devices.HIGH]
+    assert new_gui.monitors.monitors_dictionary["Or1"].trace == [
+        new_gui.devices.HIGH,
+        new_gui.devices.HIGH,
+    ]
     assert new_gui.cycles_completed_text.text == "Cycles passed: 2"
     assert new_gui.status_messages[-1] == "Redid 1 cycle."
 
@@ -549,7 +575,8 @@ def test_running_after_undo_clears_redo_history(new_gui):
 def test_run_cycles_zero_is_not_allowed(new_gui):
     """Test that the GUI rejects zero cycles.
 
-    Running zero cycles would not do anything useful so the method should return False and show a clear status message
+    Running zero cycles would not do anything useful so the method should return
+    False and show a clear status message.
     """
     assert new_gui.run_cycles(0) is False
     assert new_gui.total_cycles_completed == 0
@@ -560,7 +587,9 @@ def test_run_cycles_above_limit_is_not_allowed(new_gui):
     """Test that the GUI rejects too many cycles in one run."""
     assert new_gui.run_cycles(1001) is False
     assert new_gui.total_cycles_completed == 0
-    assert new_gui.status_messages == ["Error: cannot run more than 1000 cycles at once."]
+    assert new_gui.status_messages == [
+        "Error: cannot run more than 1000 cycles at once."
+    ]
 
 
 def test_cycle_spin_text_rejects_values_above_limit(new_gui):
@@ -629,7 +658,12 @@ def test_live_trace_keeps_latest_cycle_visible(new_gui):
 
 def test_live_trace_speed_button_cycles_available_speeds(new_gui):
     """Test the live tracing speed button cycles through fixed speeds."""
-    assert [label for label, _speed in LIVE_TRACE_SPEEDS] == ["1x", "1.5x", "2x"]
+    assert [label for label, _speed in LIVE_TRACE_SPEEDS] == [
+        "1x",
+        "1.5x",
+        "2x",
+        "0.5x",
+    ]
     assert new_gui.get_live_trace_interval_ms() == LIVE_TRACE_INTERVAL_MS
 
     new_gui.on_live_trace_speed_button(None)
@@ -644,6 +678,12 @@ def test_live_trace_speed_button_cycles_available_speeds(new_gui):
     assert new_gui.live_trace_speed_index == 2
     assert new_gui.live_trace_speed_button.label == "2x"
     assert new_gui.get_live_trace_interval_ms() == int(LIVE_TRACE_INTERVAL_MS / 2.0)
+
+    new_gui.on_live_trace_speed_button(None)
+
+    assert new_gui.live_trace_speed_index == 3
+    assert new_gui.live_trace_speed_button.label == "0.5x"
+    assert new_gui.get_live_trace_interval_ms() == int(LIVE_TRACE_INTERVAL_MS / 0.5)
 
     new_gui.on_live_trace_speed_button(None)
 
@@ -721,7 +761,9 @@ def test_toggle_live_trace_resumes_paused_trace_without_resetting_budget(new_gui
     assert new_gui.live_trace_target_cycles == 4
     assert new_gui.live_trace_cycles_completed == 2
     assert new_gui.total_cycles_completed == 2
-    assert new_gui.status_messages[-1] == "Resumed live tracing with 2 cycles remaining."
+    assert (
+        new_gui.status_messages[-1] == "Resumed live tracing with 2 cycles remaining."
+    )
     assert new_gui.status_bar_message == "Live tracing: 2/4 cycles"
 
 
@@ -758,7 +800,10 @@ def test_live_trace_rejects_missing_circuit_file(new_gui):
     assert new_gui.live_trace_running is False
     assert new_gui.live_trace_timer.running is False
 
-    assert new_gui.status_messages[-1] == "Error: no circuit loaded. Use File > Open to load one."
+    assert (
+        new_gui.status_messages[-1]
+        == "Error: no circuit loaded. Use File > Open to load one."
+    )
 
 
 def test_file_dependent_controls_disable_without_circuit_file(new_gui):
@@ -800,7 +845,8 @@ def test_run_reset_and_clear_reject_missing_circuit_file(new_gui):
         "Error: no circuit loaded. Use File > Open to load one.",
         "Error: no circuit loaded. Use File > Open to load one.",
         "Error: no circuit loaded. Use File > Open to load one.",
-        "Error: no circuit loaded. Use File > Open to load one."]
+        "Error: no circuit loaded. Use File > Open to load one.",
+    ]
 
 
 def test_live_trace_stops_when_execution_fails(new_gui):
@@ -813,7 +859,9 @@ def test_live_trace_stops_when_execution_fails(new_gui):
     assert new_gui.live_trace_timer.running is False
     assert new_gui.live_trace_button.label == "Play live"
     assert new_gui.total_cycles_completed == 0
-    assert new_gui.status_messages[-1] == "Error: network failed to reach a steady state."
+    assert (
+        new_gui.status_messages[-1] == "Error: network failed to reach a steady state."
+    )
 
 
 def test_reset_stops_live_trace(new_gui):
@@ -886,7 +934,8 @@ def test_cycle_inspector_entry_clamps_to_available_cycles(new_gui):
 def test_add_monitor(new_gui):
     """Test adding a new monitor after some cycles have already run.
 
-    The new monitor should be padded with BLANK values for the cycles that happened before it was added so all monitor traces stay the same length
+    The new monitor should be padded with BLANK values for the cycles that
+    happened before it was added so all monitor traces stay the same length.
     """
     new_gui.run_cycles(2)
 
@@ -903,19 +952,23 @@ def test_add_monitor(new_gui):
 def test_add_same_monitor_twice(new_gui):
     """Test the message shown when the same monitor is added twice.
 
-    Or1 is already monitored in the fixture so trying to add it again should not change the monitor list
+    Or1 is already monitored in the fixture so trying to add it again should
+    not change the monitor list.
     The GUI should explain the problem
     """
     new_gui.add_monitor_by_name("Or1")
 
-    assert new_gui.status_messages == ["Error: could not add monitor for Or1. signal is already monitored."]
+    assert new_gui.status_messages == [
+        "Error: could not add monitor for Or1. signal is already monitored."
+    ]
     assert new_gui.canvas.times_rendered == 1
 
 
 def test_get_signal_ids_for_output_port(new_gui):
     """Test converting a device output with a port name into internal IDs.
 
-    Some devices have more than one output, so the GUI lets the user write names like Dtype1.Q  
+    Some devices have more than one output, so the GUI lets the user write names
+    like Dtype1.Q.
     The device part and port part should both be found without making any new names
     """
     [D1_ID, Q_ID] = new_gui.names.lookup(["Dtype1", "Q"])
@@ -929,10 +982,13 @@ def test_get_signal_ids_for_output_port(new_gui):
 def test_get_signal_ids_for_net_name(new_gui):
     """Test that a net name can be resolved to the device output that drives it.
 
-    The parser may give the GUI a net name, but the simulator still records the real output behind that net
+    The parser may give the GUI a net name, but the simulator still records the
+    real output behind that net.
     """
     [NET_ID, SW1_ID] = new_gui.names.lookup(["net_a", "Sw1"])
-    new_gui.net_driver_dict[NET_ID] = SimpleNamespace(main_id=SW1_ID, port_id=None, is_literal=False)
+    new_gui.net_driver_dict[NET_ID] = SimpleNamespace(
+        main_id=SW1_ID, port_id=None, is_literal=False
+    )
 
     assert new_gui.get_signal_ids("net_a") == [SW1_ID, None]
 
@@ -940,7 +996,7 @@ def test_get_signal_ids_for_net_name(new_gui):
 def test_module_signal_lists_group_internal_names(new_gui):
     """Test that arrow-separated names are grouped as module signals.
 
-    A signal called Adder->Half->carry should appear inside nested module groups  
+    A signal called Adder->Half->carry should appear inside nested module groups
     Top level signals should stay in the ordinary signal list
     """
     [MODULE_SIGNAL_ID] = new_gui.names.lookup(["Adder->Half->carry"])
@@ -1035,7 +1091,8 @@ def test_set_switch_value_unknown_switch(new_gui):
 def test_clear_traces_keeps_total_cycle_count(new_gui):
     """Test clearing the waveform without resetting the whole simulation.
 
-    The old trace is removed, but the total cycle count is kept so future CSV and axis labels can continue from the right cycle number
+    The old trace is removed, but the total cycle count is kept so future CSV
+    and axis labels can continue from the right cycle number.
     """
     new_gui.run_cycles(2)
     new_gui.on_clear_traces(None)
@@ -1085,13 +1142,10 @@ def test_append_console_text_does_not_leave_trailing_blank_line(new_gui):
     assert new_gui.console_box.text == "first\nsecond"
 
 
-@pytest.mark.parametrize("signal, text", [
-    ("HIGH", "1"),
-    ("RISING", "1"),
-    ("LOW", "0"),
-    ("FALLING", "0"),
-    ("BLANK", "")])
-
+@pytest.mark.parametrize(
+    "signal, text",
+    [("HIGH", "1"), ("RISING", "1"), ("LOW", "0"), ("FALLING", "0"), ("BLANK", "")],
+)
 def test_signal_to_csv_text(new_gui, signal, text):
     """Test converting simulator signal values into readable CSV values."""
     signal_value = getattr(new_gui.devices, signal)
@@ -1102,7 +1156,8 @@ def test_signal_to_csv_text(new_gui, signal, text):
 def test_export_traces_to_csv(new_gui, tmp_path):
     """Test exporting monitor traces to a CSV file.
 
-    The first column should be the real cycle number, followed by one column for each monitor
+    The first column should be the real cycle number, followed by one column for
+    each monitor.
     """
     new_gui.run_cycles(2)
     new_gui.add_monitor_by_name("Sw1")
@@ -1116,7 +1171,8 @@ def test_export_traces_to_csv(new_gui, tmp_path):
         "cycle,Or1,Sw1",
         "6,1,",
         "7,1,",
-        "8,1,0"]
+        "8,1,0",
+    ]
 
 
 def test_canvas_reset_view():
@@ -1179,9 +1235,14 @@ def test_get_monitor_display_rows_groups_module_monitors():
     """Test the rows used to draw top level and module monitor traces."""
     names = Names()
     devices = Devices(names)
-    monitors = SimpleNamespace(monitors_dictionary={
-        "Out": SimpleNamespace(requested_name="Out", trace=[devices.HIGH]),
-        "Mod->Inner->Q": SimpleNamespace(requested_name="Mod->Inner->Q", trace=[devices.LOW])})
+    monitors = SimpleNamespace(
+        monitors_dictionary={
+            "Out": SimpleNamespace(requested_name="Out", trace=[devices.HIGH]),
+            "Mod->Inner->Q": SimpleNamespace(
+                requested_name="Mod->Inner->Q", trace=[devices.LOW]
+            ),
+        }
+    )
     canvas = DummyCanvas()
     canvas.monitors = monitors
 
@@ -1189,13 +1250,20 @@ def test_get_monitor_display_rows_groups_module_monitors():
         {"kind": "trace", "label": "Out", "trace": [devices.HIGH], "height": 1},
         {"kind": "heading", "label": "Mod", "height": 0.35},
         {"kind": "heading", "label": "  Inner", "height": 0.35},
-        {"kind": "trace", "label": "    Q", "trace": [devices.LOW], "height": 1}]
+        {"kind": "trace", "label": "    Q", "trace": [devices.LOW], "height": 1},
+    ]
 
 
 def test_get_export_image_size_grows_for_long_traces():
     """Test that exported images are large enough for the waveform data."""
     devices = Devices(Names())
-    monitors = SimpleNamespace(monitors_dictionary={"VeryLongSignalName": SimpleNamespace(requested_name="VeryLongSignalName", trace=[devices.HIGH] * 40)})
+    monitors = SimpleNamespace(
+        monitors_dictionary={
+            "VeryLongSignalName": SimpleNamespace(
+                requested_name="VeryLongSignalName", trace=[devices.HIGH] * 40
+            )
+        }
+    )
     canvas = DummyCanvas()
     canvas.monitors = monitors
 
@@ -1209,7 +1277,13 @@ def test_canvas_render_size_override_controls_layout_size():
     """Test export rendering can use a virtual size without resizing the canvas."""
     devices = Devices(Names())
     canvas = DummyCanvas()
-    canvas.monitors = SimpleNamespace(monitors_dictionary={"Signal": SimpleNamespace(requested_name="Signal", trace=[devices.HIGH] * 40)})
+    canvas.monitors = SimpleNamespace(
+        monitors_dictionary={
+            "Signal": SimpleNamespace(
+                requested_name="Signal", trace=[devices.HIGH] * 40
+            )
+        }
+    )
 
     assert canvas.get_render_size() == SimpleNamespace(width=500, height=300)
     small_layout = canvas.get_waveform_layout()
@@ -1239,7 +1313,13 @@ def test_export_tiles_cover_full_image_from_visible_canvas_tiles():
 def test_get_waveform_layout_matches_trace_area():
     """Test the waveform geometry shared with the cycle inspector slider."""
     devices = Devices(Names())
-    monitors = SimpleNamespace(monitors_dictionary={"Signal": SimpleNamespace(requested_name="Signal", trace=[devices.HIGH] * 10)})
+    monitors = SimpleNamespace(
+        monitors_dictionary={
+            "Signal": SimpleNamespace(
+                requested_name="Signal", trace=[devices.HIGH] * 10
+            )
+        }
+    )
     canvas = DummyCanvas()
     canvas.monitors = monitors
 
@@ -1256,7 +1336,10 @@ def test_canvas_label_text_is_shortened_before_waveform():
     canvas = DummyCanvas()
 
     assert canvas.get_canvas_label_text("SHORT", 120) == "SHORT"
-    assert canvas.get_canvas_label_text("VERY_LONG_SIGNAL_NAME_THAT_WOULD_OVERLAP", 120) == "VERY_LON..."
+    assert (
+        canvas.get_canvas_label_text("VERY_LONG_SIGNAL_NAME_THAT_WOULD_OVERLAP", 120)
+        == "VERY_LON..."
+    )
 
 
 def test_signal_to_y():
@@ -1281,7 +1364,8 @@ def test_signal_to_y():
 def test_cycle_label_interval(step, interval):
     """Test the spacing between cycle number labels.
 
-    When the waveform is compressed, labels need to be spaced further apart so the numbers do not overlap
+    When the waveform is compressed, labels need to be spaced further apart so
+    the numbers do not overlap.
     """
     canvas = DummyCanvas()
     assert canvas.get_cycle_label_interval(step) == interval
@@ -1305,9 +1389,13 @@ def test_draw_trace():
 
     canvas.draw_line = save_line
 
-    canvas.draw_trace([devices.LOW, devices.HIGH, devices.BLANK, devices.LOW], 100, 10, 30, 5)
+    canvas.draw_trace(
+        [devices.LOW, devices.HIGH, devices.BLANK, devices.LOW], 100, 10, 30, 5
+    )
 
-    assert lines_drawn == [(100, 10, 105, 10),
+    assert lines_drawn == [
+        (100, 10, 105, 10),
         (105, 10, 105, 30),
         (105, 30, 110, 30),
-        (115, 10, 120, 10)]
+        (115, 10, 120, 10),
+    ]
