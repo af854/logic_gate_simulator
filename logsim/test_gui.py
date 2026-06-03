@@ -658,7 +658,12 @@ def test_live_trace_keeps_latest_cycle_visible(new_gui):
 
 def test_live_trace_speed_button_cycles_available_speeds(new_gui):
     """Test the live tracing speed button cycles through fixed speeds."""
-    assert [label for label, _speed in LIVE_TRACE_SPEEDS] == ["1x", "1.5x", "2x"]
+    assert [label for label, _speed in LIVE_TRACE_SPEEDS] == [
+        "1x",
+        "1.5x",
+        "2x",
+        "0.5x",
+    ]
     assert new_gui.get_live_trace_interval_ms() == LIVE_TRACE_INTERVAL_MS
 
     new_gui.on_live_trace_speed_button(None)
@@ -673,6 +678,12 @@ def test_live_trace_speed_button_cycles_available_speeds(new_gui):
     assert new_gui.live_trace_speed_index == 2
     assert new_gui.live_trace_speed_button.label == "2x"
     assert new_gui.get_live_trace_interval_ms() == int(LIVE_TRACE_INTERVAL_MS / 2.0)
+
+    new_gui.on_live_trace_speed_button(None)
+
+    assert new_gui.live_trace_speed_index == 3
+    assert new_gui.live_trace_speed_button.label == "0.5x"
+    assert new_gui.get_live_trace_interval_ms() == int(LIVE_TRACE_INTERVAL_MS / 0.5)
 
     new_gui.on_live_trace_speed_button(None)
 
