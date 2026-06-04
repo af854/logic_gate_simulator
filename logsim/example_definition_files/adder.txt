@@ -1,0 +1,28 @@
+DEVICES
+    SWITCH(0) A, B, CIN;
+    XOR XOR1, XOR2;
+    AND(2) AND1, AND2;
+    OR(2) OR1;
+NETS
+    SUM, COUT;
+CONNECT
+    XOR1.I1 = A;
+    XOR1.I2 = B;
+
+    XOR2.I1 = XOR1;
+    XOR2.I2 = CIN;
+
+    AND1.I1 = A;
+    AND1.I2 = B;
+
+    AND2.I1 = XOR1;
+    AND2.I2 = CIN;
+
+    OR1.I1 = AND1;
+    OR1.I2 = AND2;
+
+    SUM = XOR2;
+    COUT = OR1;
+MONITOR
+    A, B, CIN;
+    SUM, COUT;
