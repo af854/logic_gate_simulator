@@ -47,7 +47,6 @@ class DummyGui:
     get_live_trace_interval_ms = Gui.get_live_trace_interval_ms
     on_live_trace_speed_button = Gui.on_live_trace_speed_button
     update_live_trace_speed_button = Gui.update_live_trace_speed_button
-    has_loaded_circuit = Gui.has_loaded_circuit
     show_no_loaded_circuit_error = Gui.show_no_loaded_circuit_error
     update_file_dependent_controls = Gui.update_file_dependent_controls
     on_run_cycles_button = Gui.on_run_cycles_button
@@ -57,9 +56,6 @@ class DummyGui:
     get_max_trace_length = Gui.get_max_trace_length
     update_cycle_inspector_range = Gui.update_cycle_inspector_range
     update_cycle_inspector_label = Gui.update_cycle_inspector_label
-    update_cycle_inspector_label_width = Gui.update_cycle_inspector_label_width
-    cycle_index_to_slider_value = Gui.cycle_index_to_slider_value
-    slider_value_to_cycle_index = Gui.slider_value_to_cycle_index
     cycle_number_to_cycle_index = Gui.cycle_number_to_cycle_index
     set_cycle_inspector_index = Gui.set_cycle_inspector_index
     on_cycle_inspector_entry = Gui.on_cycle_inspector_entry
@@ -88,7 +84,7 @@ class DummyGui:
         """Store status messages so the tests can check them later"""
         self.status_messages.append(message)
 
-    def set_status(self, message):
+    def SetStatusText(self, message):
         """Store the short status bar message."""
         self.status_bar_message = message
 
@@ -285,6 +281,9 @@ class DummyCanvasWidget:
 
     def reset_view(self):
         self.times_reset += 1
+        self.pan_x = 0
+        self.pan_y = 0
+        self.zoom = 1
 
 
 class DummyStatusBox:
@@ -662,28 +661,25 @@ def test_live_trace_speed_button_cycles_available_speeds(new_gui):
         "1x",
         "1.5x",
         "2x",
+        "3x",
+        "5x",
         "0.5x",
     ]
     assert new_gui.get_live_trace_interval_ms() == LIVE_TRACE_INTERVAL_MS
 
-    new_gui.on_live_trace_speed_button(None)
+    for expected_index in range(1, len(LIVE_TRACE_SPEEDS)):
+        expected_label, expected_speed = LIVE_TRACE_SPEEDS[expected_index]
+        new_gui.on_live_trace_speed_button(None)
 
-    assert new_gui.live_trace_speed_index == 1
-    assert new_gui.live_trace_speed_button.label == "1.5x"
-    assert new_gui.live_trace_speed_button.tooltip == "Live tracing speed: 1.5x"
-    assert new_gui.get_live_trace_interval_ms() == int(LIVE_TRACE_INTERVAL_MS / 1.5)
-
-    new_gui.on_live_trace_speed_button(None)
-
-    assert new_gui.live_trace_speed_index == 2
-    assert new_gui.live_trace_speed_button.label == "2x"
-    assert new_gui.get_live_trace_interval_ms() == int(LIVE_TRACE_INTERVAL_MS / 2.0)
-
-    new_gui.on_live_trace_speed_button(None)
-
-    assert new_gui.live_trace_speed_index == 3
-    assert new_gui.live_trace_speed_button.label == "0.5x"
-    assert new_gui.get_live_trace_interval_ms() == int(LIVE_TRACE_INTERVAL_MS / 0.5)
+        assert new_gui.live_trace_speed_index == expected_index
+        assert new_gui.live_trace_speed_button.label == expected_label
+        assert (
+            new_gui.live_trace_speed_button.tooltip
+            == f"Live tracing speed: {expected_label}"
+        )
+        assert new_gui.get_live_trace_interval_ms() == int(
+            LIVE_TRACE_INTERVAL_MS / expected_speed
+        )
 
     new_gui.on_live_trace_speed_button(None)
 
@@ -1095,11 +1091,19 @@ def test_clear_traces_keeps_total_cycle_count(new_gui):
     and axis labels can continue from the right cycle number.
     """
     new_gui.run_cycles(2)
+    new_gui.canvas.pan_x = -120
+    new_gui.canvas.pan_y = -80
+    new_gui.canvas.zoom = 2
+
     new_gui.on_clear_traces(None)
 
     assert new_gui.cycles_completed == 0
     assert new_gui.total_cycles_completed == 2
     assert new_gui.canvas.cycle_offset == 2
+    assert new_gui.canvas.times_reset == 1
+    assert new_gui.canvas.pan_x == 0
+    assert new_gui.canvas.pan_y == 0
+    assert new_gui.canvas.zoom == 1
     assert new_gui.cycles_completed_text.text == "Cycles passed: 2"
     assert new_gui.monitors.monitors_dictionary["Or1"].trace == []
     assert new_gui.status_messages[-1] == "Cleared traces."
