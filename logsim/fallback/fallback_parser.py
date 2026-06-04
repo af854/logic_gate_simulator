@@ -11,7 +11,29 @@ Parser - parses the definition file and builds the logic network.
 
 
 class Parser:
+    """Parse a definition file and build the logic network.
+
+    The parser validates syntax and semantics for the scanner symbols and then
+    constructs the corresponding devices, connections and monitors for the
+    Logic Simulator.
+    """
+
     def __init__(self, names, devices, network, monitors, scanner):
+        """Initialise parser state with the required managers and scanner.
+
+        Parameters
+        ----------
+        names : Names
+            Symbol table for keyword and device name lookup.
+        devices : Devices
+            Device manager used to instantiate devices.
+        network : Network
+            Network manager used to create connections.
+        monitors : Monitors
+            Monitors manager used to register signal monitors.
+        scanner : Scanner
+            Scanner used to retrieve symbols from the definition file.
+        """
         self.names = names
         self.devices = devices
         self.network = network
@@ -33,6 +55,7 @@ class Parser:
         self.device_kind_ids = self.param_device_ids | self.fixed_device_ids
 
     def next_sym(self):
+        """Advance to the next symbol from the scanner."""
         self.symbol = self.scanner.get_symbol()
 
     def display_error(self, message, stopping_types):
@@ -59,6 +82,18 @@ class Parser:
             self.scanner.print_error_line(symbol.line_num, symbol.line_pos)
 
     def get_device_error_msg(self, error_type):
+        """Map a device error code to a human-readable message.
+
+        Parameters
+        ----------
+        error_type : int
+            Error code returned by the device manager.
+
+        Returns
+        -------
+        str
+            Description of the device error.
+        """
         if error_type == self.devices.INVALID_QUALIFIER:
             return "Invalid parameter for this device kind."
         if error_type == self.devices.NO_QUALIFIER:
@@ -72,6 +107,18 @@ class Parser:
         return f"Unknown device error (Code {error_type})."
 
     def get_monitor_error_msg(self, error_type):
+        """Map a monitor error code to a human-readable message.
+
+        Parameters
+        ----------
+        error_type : int
+            Error code returned by the monitors manager.
+
+        Returns
+        -------
+        str
+            Description of the monitor error.
+        """
         if error_type == self.monitors.NOT_OUTPUT:
             return "Cannot monitor an input or non-existent port."
         if error_type == self.monitors.MONITOR_PRESENT:
@@ -106,12 +153,21 @@ class Parser:
             msg = "Cannot connect an input to another input. Source must be an output."
             target_sym = src_port or src_dev
         elif err_code == self.network.OUTPUT_TO_OUTPUT:
-            msg = "Cannot connect an output to another output. Destination must be an input."
+            msg = (
+                "Cannot connect an output to another output. "
+                "Destination must be an input."
+            )
             target_sym = dest_port or dest_dev
 
         return msg, target_sym
 
     def parse_network(self):
+        """Parse the complete network definition from the file.
+
+        The parser expects the file to contain DEVICES, CONNECT and MONITOR
+        blocks in that order. If the definition is syntactically and
+        semantically valid, the method returns True.
+        """
         self.next_sym()
 
         if (
@@ -173,6 +229,11 @@ class Parser:
         return self.error_count == 0
 
     def parse_device(self):
+        """Parse a device declaration and instantiate devices if valid.
+
+        The method checks the device kind, parses the device names and then
+        creates each device if there are no syntax or semantic errors.
+        """
         stopping_types = (
             self.scanner.SEMICOLON,
             self.scanner.KEYWORD,
@@ -208,6 +269,19 @@ class Parser:
             )
 
     def parse_device_kind(self, stopping_types):
+        """Parse a device kind token and optional parameter.
+
+        Parameters
+        ----------
+        stopping_types : tuple
+            Symbol types that stop parsing at this point.
+
+        Returns
+        -------
+        tuple
+            A tuple containing the device kind ID and the parameter symbol,
+            or (None, None) if parsing failed.
+        """
         kind_id = self.symbol.id
         param_sym = None
 
@@ -250,6 +324,18 @@ class Parser:
         return kind_id, param_sym
 
     def parse_name_list(self, stopping_types):
+        """Parse a comma-separated list of device names.
+
+        Parameters
+        ----------
+        stopping_types : tuple
+            Symbol types that terminate the name list.
+
+        Returns
+        -------
+        list
+            A list of name symbols, or None if parsing failed.
+        """
         names = []
 
         if self.symbol.type == self.scanner.NAME:
@@ -301,6 +387,11 @@ class Parser:
         return lit_id
 
     def parse_connect(self):
+        """Parse a connection statement and build network links.
+
+        The method parses the destination signal list, the source expression
+        and then creates connections if the syntax and semantics are valid.
+        """
         stopping_types = (
             self.scanner.SEMICOLON,
             self.scanner.KEYWORD,
@@ -358,6 +449,11 @@ class Parser:
             )
 
     def parse_monitor(self):
+        """Parse a monitor statement and configure monitors.
+
+        The method parses a list of signals to monitor and registers each with
+        the monitors manager if there are no syntax or semantic errors.
+        """
         stopping_types = (
             self.scanner.SEMICOLON,
             self.scanner.KEYWORD,
@@ -396,6 +492,18 @@ class Parser:
             )
 
     def parse_signal_list(self, stopping_types):
+        """Parse a list of signals separated by commas.
+
+        Parameters
+        ----------
+        stopping_types : tuple
+            Symbol types that terminate the signal list.
+
+        Returns
+        -------
+        list
+            A list of (device symbol, port symbol) tuples, or None if parsing failed.
+        """
         signals = []
 
         dev_sym, port_sym = self.parse_signal((self.scanner.COMMA, *stopping_types))
@@ -421,6 +529,18 @@ class Parser:
         return signals
 
     def parse_signal(self, stopping_types):
+        """Parse a device signal reference, optionally including a port.
+
+        Parameters
+        ----------
+        stopping_types : tuple
+            Symbol types that terminate the signal reference.
+
+        Returns
+        -------
+        tuple
+            A tuple of (device symbol, port symbol), or (None, None) if parsing failed.
+        """
         dev_sym, port_sym = None, None
 
         if self.symbol.type == self.scanner.NAME:
@@ -457,7 +577,21 @@ class Parser:
         return dev_sym, port_sym
 
     def parse_source(self, stopping_types):
-        """Returns (dev_sym, port_sym, literal_sym)."""
+        """Parse a source expression for a connection statement.
+
+        The source may be a literal 0 or 1, or a signal reference comprising a
+        device name and optional port.
+
+        Parameters
+        ----------
+        stopping_types : tuple
+            Symbol types that terminate the source expression.
+
+        Returns
+        -------
+        tuple
+            A tuple of (device symbol, port symbol, literal symbol).
+        """
         if self.symbol.type == self.scanner.NUMBER:
             val_sym = self.symbol
             self.next_sym()
@@ -471,3 +605,4 @@ class Parser:
                 return None, None, None
         else:
             dev_sym, port_sym = self.parse_signal(stopping_types)
+            return dev_sym, port_sym, None
