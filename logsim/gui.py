@@ -31,7 +31,7 @@ GLUT_INITIALISED = False
 
 
 def initialise_glut_once():
-    """Initialise GLUT once per process."""
+    """Initialise GLUT the first time the GUI needs bitmap text."""
     global GLUT_INITIALISED
     if not GLUT_INITIALISED:
         GLUT.glutInit()
@@ -140,7 +140,14 @@ ID_SHOW_CONSOLE = wx.NewIdRef()
 
 MAX_RUN_CYCLES = 1000
 LIVE_TRACE_INTERVAL_MS = 1000
-LIVE_TRACE_SPEEDS = [("1x", 1.0), ("1.5x", 1.5), ("2x", 2.0), ("0.5x", 0.5)]
+LIVE_TRACE_SPEEDS = [
+    ("1x", 1.0),
+    ("1.5x", 1.5),
+    ("2x", 2.0),
+    ("3x", 3.0),
+    ("5x", 5.0),
+    ("0.5x", 0.5),
+]
 MIN_FRAME_WIDTH = 900
 MIN_FRAME_HEIGHT = 650
 SIMULATION_CONTROL_WIDTH = 140
@@ -221,10 +228,6 @@ LIGHT_CLOSE_ICON_PATH = os.path.join(
 DARK_CLOSE_ICON_PATH = os.path.join(
     os.path.dirname(__file__), "icons", "x_icon_dark.png"
 )
-LIGHT_MODE_ICON_PATH = os.path.join(
-    os.path.dirname(__file__), "icons", "light_mode.png"
-)
-DARK_MODE_ICON_PATH = os.path.join(os.path.dirname(__file__), "icons", "dark_mode.png")
 LIGHT_UNDO_ICON_PATH = os.path.join(
     os.path.dirname(__file__), "icons", "undo_light.png"
 )
@@ -254,7 +257,17 @@ DARK_REMOVE_ICON_PATH = os.path.join(
 
 
 def add_signal_to_module_tree(module_tree, full_signal_name, value):
-    """Add one arrow-separated signal name to a nested module tree."""
+    """Store a module signal in a tree that mirrors its arrow-separated path.
+
+    Arguments:
+    module_tree -- dictionary being built for module headings and signal rows.
+    full_signal_name -- signal name such as Adder->HalfAdder->Sum.
+    value -- object to store at the leaf, usually a trace or the full signal name.
+
+    Creates missing nested dictionaries and appends the final signal to the
+    'signals_at_this_level' list for the deepest module
+
+    """
     signal_parts = full_signal_name.split("->")
     module_names = signal_parts[:-1]
     short_signal_name = signal_parts[-1]
@@ -271,11 +284,6 @@ def add_signal_to_module_tree(module_tree, full_signal_name, value):
     if signal_list_name not in current_group:
         current_group[signal_list_name] = []
     current_group[signal_list_name].append((short_signal_name, value))
-
-
-###############################################################################
-# OPENGL CANVAS
-###############################################################################
 
 
 class MyGLCanvas(wxcanvas.GLCanvas):
@@ -307,7 +315,12 @@ class MyGLCanvas(wxcanvas.GLCanvas):
     """
 
     def __init__(self, parent, devices, monitors):
-        """Initialise canvas properties and useful variables."""
+        """Initialise OpenGL, drawing state, and canvas event bindings.
+
+        Creates the GL context, stores simulator references, resets pan/zoom
+        values, and binds paint, resize, and mouse events
+
+        """
         super().__init__(
             parent,
             -1,
@@ -348,7 +361,12 @@ class MyGLCanvas(wxcanvas.GLCanvas):
         self.Bind(wx.EVT_MOUSE_EVENTS, self.on_mouse)
 
     def init_gl(self):
-        """Configure and initialise the OpenGL context."""
+        """Configure OpenGL so waveform coordinates match window pixels.
+
+        Sets the view and projection for the current render size, then
+        applies the current pan and zoom transform before drawing
+
+        """
         size = self.get_render_size()
         self.SetCurrent(self.context)
 
@@ -367,7 +385,13 @@ class MyGLCanvas(wxcanvas.GLCanvas):
         GL.glScaled(self.zoom, self.zoom, self.zoom)
 
     def get_render_size(self):
-        """Return the size used for layout calculations."""
+        """Return the size used for drawing and layout calculations.
+
+        Return the real canvas client size during normal drawing. During PNG
+        export, return the temporary export size so the same layout code can
+        draw tiles larger than the visible window.
+
+        """
         render_size_override = getattr(self, "render_size_override", None)
         if render_size_override is not None:
             return render_size_override
@@ -375,7 +399,16 @@ class MyGLCanvas(wxcanvas.GLCanvas):
         return self.GetClientSize()
 
     def render(self, swap_buffers=True):
-        """Handle all drawing operations."""
+        """Redraw the waveform canvas.
+
+        Optional arguments:
+        swap_buffers -- if True, present the back buffer on screen. PNG export
+        passes False while reading pixels from off-screen tiles.
+
+        Clears the canvas, lays out monitor rows, draws axes, waveforms, module
+        headings, and optional cycle inspector values
+
+        """
         self.SetCurrent(self.context)
         if not self.init:
             # Configure the viewport, modelview and projection matrices
@@ -496,7 +529,7 @@ class MyGLCanvas(wxcanvas.GLCanvas):
             self.SwapBuffers()
 
     def on_paint(self, event):
-        """Handle the paint event."""
+        """Redraw the canvas in response to a wx paint event."""
         self.SetCurrent(self.context)
         if not self.init:
             # Configure the viewport, modelview and projection matrices
@@ -506,13 +539,18 @@ class MyGLCanvas(wxcanvas.GLCanvas):
         self.render()
 
     def on_size(self, event):
-        """Handle the canvas resize event."""
+        """Mark the OpenGL projection as stale after a canvas resize."""
         # Forces reconfiguration of the viewport, modelview and projection
         # matrices on the next paint event
         self.init = False
 
     def on_mouse(self, event):
-        """Handle mouse events."""
+        """Pan by dragging and zoom around the mouse wheel position.
+
+        Updates pan_x, pan_y, and zoom, clamps the view against the top-left
+        origin, and schedules a redraw
+
+        """
         # Calculate object coordinates of the mouse position
         size = self.get_render_size()
         ox = (event.GetX() - self.pan_x) / self.zoom
@@ -545,7 +583,7 @@ class MyGLCanvas(wxcanvas.GLCanvas):
         self.Refresh()  # triggers the paint event
 
     def limit_top_left_pan(self):
-        """Prevent dragging the waveform past its top-left starting corner."""
+        """Clamp panning so the user cannot drag past the waveform origin"""
         size = self.get_render_size()
         minimum_pan_y = size.height * (1 - self.zoom)
 
@@ -555,13 +593,20 @@ class MyGLCanvas(wxcanvas.GLCanvas):
             self.pan_y = minimum_pan_y
 
     def zoom_at_canvas_centre(self, factor):
-        """Zoom around the centre of the canvas."""
-        # Find the centre of thw canvas
+        """Scale the view while keeping the canvas centre visually fixed.
+
+        Arguments:
+        factor -- multiplier applied to the current zoom, for example 1.25 to
+        zoom in or 0.8 to zoom out
+
+        Adjusts pan as well as zoom so the centre point stays under the centre
+        of the canvas after scaling.
+
+        """
+        # Find the centre of the canvas
         size = self.get_render_size()
-        centre_x = size.width / 2
-        centre_y = size.height / 2
-        object_x = (centre_x - self.pan_x) / self.zoom
-        object_y = (centre_y - self.pan_y) / self.zoom
+        object_x = (size.width / 2 - self.pan_x) / self.zoom
+        object_y = (size.height / 2 - self.pan_y) / self.zoom
         old_zoom = self.zoom
 
         self.zoom *= factor
@@ -573,16 +618,8 @@ class MyGLCanvas(wxcanvas.GLCanvas):
         self.init = False
         self.Refresh()
 
-    def zoom_in(self):
-        """Zoom into the waveform display."""
-        self.zoom_at_canvas_centre(1.25)
-
-    def zoom_out(self):
-        """Zoom out of the waveform display."""
-        self.zoom_at_canvas_centre(0.8)
-
     def reset_view(self):
-        """Reset waveform panning and zooming."""
+        """Return the waveform view to the unpanned unzoomed state."""
         self.pan_x = 0
         self.pan_y = 0
         self.zoom = 1
@@ -590,7 +627,15 @@ class MyGLCanvas(wxcanvas.GLCanvas):
         self.Refresh()
 
     def follow_latest_cycle(self, right_margin=20):
-        """Pan horizontally enough to keep the newest trace cycle visible."""
+        """Pan right just enough to keep the newest cycle visible.
+
+        Optional arguments:
+        right_margin -- minimum number of screen pixels to leave after the
+        newest cycle.
+
+        Return True if the view was moved, otherwise False.
+
+        """
         layout = self.get_waveform_layout()
         trace_length = layout["trace_length"]
         if trace_length <= 0:
@@ -610,7 +655,12 @@ class MyGLCanvas(wxcanvas.GLCanvas):
         return True
 
     def get_export_image_size(self):
-        """Return a PNG size large enough for the current waveform data."""
+        """Return a PNG size large enough for all visible waveform data
+
+        The export can be wider or taller than the current window so long signal
+        names and long traces are not clipped in the saved image.
+
+        """
         if not self.monitors.monitors_dictionary:
             return self.GetClientSize()
 
@@ -640,7 +690,17 @@ class MyGLCanvas(wxcanvas.GLCanvas):
         return wx.Size(width, height)
 
     def save_image(self, file_path):
-        """Save the current waveform display as a PNG image."""
+        """Save the current waveform display as a PNG image.
+
+        Arguments:
+        file_path -- destination path for the PNG file
+
+        Return True if wx successfully writes the image, otherwise False.
+
+        Temporarily renders the waveform in export-sized tiles, restores the
+        user's pan/zoom state, and redraws the visible canvas afterwards.
+
+        """
         export_size = self.get_export_image_size()
         if export_size.width <= 0 or export_size.height <= 0:
             return False
@@ -688,7 +748,7 @@ class MyGLCanvas(wxcanvas.GLCanvas):
             self.render()
 
     def create_blank_export_image(self, export_size):
-        """Return a blank export image filled with the canvas background colour."""
+        """Return an export image prefilled with the canvas background colour."""
         red = int(self.theme["canvas_bg"][0] * 255)
         green = int(self.theme["canvas_bg"][1] * 255)
         blue = int(self.theme["canvas_bg"][2] * 255)
@@ -699,7 +759,16 @@ class MyGLCanvas(wxcanvas.GLCanvas):
         return export_image
 
     def get_export_tiles(self, export_size, capture_size):
-        """Return bottom-origin canvas tiles needed to cover one export image."""
+        """Return the OpenGL tiles needed to capture a full size export.
+
+        Arguments:
+        export_size -- final PNG size
+        capture_size -- maximum tile size available from the visible GL canvas
+
+        The tile source coordinates use OpenGL's bottom-left origin, while the
+        destination coordinates use wx.Image's top-left origin.
+
+        """
         tiles = []
         source_y = 0
         while source_y < export_size.height:
@@ -723,7 +792,14 @@ class MyGLCanvas(wxcanvas.GLCanvas):
         return tiles
 
     def render_text(self, text, x_pos, y_pos, colour=(0.0, 0.0, 0.0)):
-        """Handle text drawing operations."""
+        """Draw bitmap text at an OpenGL coordinate.
+
+        Arguments:
+        text -- string to draw; newline characters move down by one text row
+        x_pos, y_pos -- OpenGL position of the first character
+        colour -- RGB tuple using OpenGL's 0.0 to 1.0 colour range
+
+        """
         GL.glColor3f(*colour)
         GL.glRasterPos2f(x_pos, y_pos)
         font = GLUT.GLUT_BITMAP_HELVETICA_12
@@ -736,7 +812,7 @@ class MyGLCanvas(wxcanvas.GLCanvas):
                 GLUT.glutBitmapCharacter(font, ord(character))
 
     def get_canvas_label_text(self, label_text, start_x):
-        """Shorten a canvas label if it would run into the waveform."""
+        """Shorten a signal label before it overlaps the waveform area."""
         label_margin = 30
         average_character_width = 8
         available_width = start_x - label_margin
@@ -749,7 +825,12 @@ class MyGLCanvas(wxcanvas.GLCanvas):
         return label_text[: max_characters - 3] + "..."
 
     def get_monitor_display_rows(self):
-        """Return grouped rows for waveform monitor labels and traces."""
+        """Return the rows that render() draws for labels, headings, and traces.
+
+        Top-level monitors become trace rows. Module monitors are first grouped
+        into a tree, then flattened into heading rows and indented trace rows.
+
+        """
         rows = []
         module_tree = {}
 
@@ -780,7 +861,16 @@ class MyGLCanvas(wxcanvas.GLCanvas):
         return rows
 
     def add_module_monitor_display_rows(self, rows, signal_group, depth):
-        """Append heading and trace rows for one module signal group."""
+        """Append display rows for a nested module group.
+
+        Arguments:
+        rows -- list being filled with heading and trace row dictionaries
+        signal_group -- subtree produced by add_signal_to_module_tree
+        depth -- current module nesting depth, used for indentation
+
+        Adds rows in sorted order so module traces appear predictably.
+
+        """
         indent = "  " * depth
 
         for module_name in sorted(signal_group):
@@ -810,7 +900,7 @@ class MyGLCanvas(wxcanvas.GLCanvas):
             self.add_module_monitor_display_rows(rows, child_group, depth + 1)
 
     def signal_to_y(self, signal, low_y, high_y):
-        """Convert a signal value into a y-position."""
+        """Convert a simulator signal value into a waveform y-coordinate."""
         # RISING and FALLING are drawn at the level they are moving towards
         if signal in [self.devices.HIGH, self.devices.RISING]:
             return high_y
@@ -821,14 +911,14 @@ class MyGLCanvas(wxcanvas.GLCanvas):
         return None
 
     def draw_line(self, x1, y1, x2, y2):
-        """Draw a single OpenGL line."""
+        """Draw one OpenGL line segment between two canvas coordinates."""
         GL.glBegin(GL.GL_LINES)
         GL.glVertex2f(x1, y1)
         GL.glVertex2f(x2, y2)
         GL.glEnd()
 
     def draw_filled_rectangle(self, x_pos, y_pos, width, height):
-        """Draw a filled rectangle on the canvas."""
+        """Draw a filled OpenGL rectangle from its lower-left corner."""
         GL.glBegin(GL.GL_QUADS)
         GL.glVertex2f(x_pos, y_pos)
         GL.glVertex2f(x_pos + width, y_pos)
@@ -837,7 +927,7 @@ class MyGLCanvas(wxcanvas.GLCanvas):
         GL.glEnd()
 
     def get_cycle_label_interval(self, step):
-        """Return a readable cycle label interval for the current scale."""
+        """Return how often cycle numbers should be labelled for this scale."""
         # Do not label every cycle, otherwise the numbers overlap and become
         # unreadable - the interval depends on the zoom level
         if step >= 18:
@@ -849,7 +939,16 @@ class MyGLCanvas(wxcanvas.GLCanvas):
         return 50
 
     def get_waveform_layout(self, display_rows=None):
-        """Return horizontal waveform layout values used by drawing and controls."""
+        """Calculate waveform spacing shared by drawing and view controls.
+
+        Optional arguments:
+        display_rows -- precomputed monitor rows; if omitted, rows are built
+        from the current monitor dictionary
+
+        Return a dictionary containing display_height, start_x, step, and
+        trace_length.
+
+        """
         size = self.get_render_size()
         if display_rows is None:
             display_rows = self.get_monitor_display_rows()
@@ -897,7 +996,7 @@ class MyGLCanvas(wxcanvas.GLCanvas):
     def draw_cycle_axis(
         self, trace_length, start_x, axis_y, bottom_y, top_y, step, cycle_offset=0
     ):
-        """Draw the shared x-axis showing simulation cycles."""
+        """Draw the shared x-axis and vertical cycle grid lines."""
         if trace_length <= 0:
             return
 
@@ -949,7 +1048,7 @@ class MyGLCanvas(wxcanvas.GLCanvas):
                 )
 
     def draw_value_axis(self, start_x, low_y, high_y, step, trace_length):
-        """Draw the per-trace y-axis showing LOW/HIGH values."""
+        """Draw the 0/1 guide lines and labels for one binary trace."""
         axis_x = start_x - 10
         end_x = start_x + trace_length * step
 
@@ -968,7 +1067,7 @@ class MyGLCanvas(wxcanvas.GLCanvas):
         )
 
     def draw_trace(self, trace, start_x, low_y, high_y, step):
-        """Draw a single monitored signal trace."""
+        """Draw one monitor trace as horizontal LOW/HIGH waveform segments."""
         previous_y = None
 
         for index, signal in enumerate(trace):
@@ -990,7 +1089,7 @@ class MyGLCanvas(wxcanvas.GLCanvas):
             previous_y = current_y
 
     def signal_to_display_text(self, signal):
-        """Return a short text value for a signal on the canvas."""
+        """Return the compact text shown by the cycle inspector for a signal."""
         if signal == self.devices.HIGH or signal == self.devices.RISING:
             return "1"
         if signal == self.devices.LOW or signal == self.devices.FALLING:
@@ -1000,7 +1099,7 @@ class MyGLCanvas(wxcanvas.GLCanvas):
         return str(signal)
 
     def draw_cycle_inspector(self, trace_length, start_x, bottom_y, top_y, step):
-        """Draw a vertical cursor for the selected inspected cycle."""
+        """Draw the vertical cursor for the selected cycle."""
         if trace_length <= 0:
             return
 
@@ -1011,14 +1110,14 @@ class MyGLCanvas(wxcanvas.GLCanvas):
         GL.glLineWidth(1.0)
 
     def get_cycle_inspector_x(self, trace_length, start_x, step):
-        """Return the x-position of the cycle inspector cursor."""
+        """Return the x coordinate of the cycle inspector cursor."""
         cycle_index = min(self.cycle_inspector_index, trace_length - 1)
         return start_x + (cycle_index + 1) * step
 
     def draw_cycle_inspector_value(
         self, trace, cycle_index, start_x, low_y, high_y, step
     ):
-        """Draw the selected cycle value beside one trace."""
+        """Draw the inspected value beside one trace at the cursor position."""
         if cycle_index < 0 or cycle_index >= len(trace):
             value_text = "-"
         else:
@@ -1035,15 +1134,10 @@ class MyGLCanvas(wxcanvas.GLCanvas):
         self.render_text(value_text, text_x, value_y, colour=self.theme["canvas_text"])
 
     def get_cycle_inspector_value_background(self, text_x, text_y, value_text):
-        """Return the rectangle behind one cycle inspector value."""
+        """Return the background rectangle behind one inspected value label."""
         width = len(value_text) * 8 + 8
         height = 16
         return (text_x - 4, text_y - 4, width, height)
-
-
-###############################################################################
-# GUI FRAME
-###############################################################################
 
 
 class Gui(wx.Frame):
@@ -1052,20 +1146,38 @@ class Gui(wx.Frame):
     This class provides a graphical user interface for the Logic Simulator and
     enables the user to change the circuit properties and run simulations.
 
-    Parameters
-    ----------
-    title: title of the window.
+    Gui owns the wx controls, menus, status console, and event bindings. The
+    simulator state still belongs to Names, Devices, Network, and Monitors; this
+    class displays that state and calls their public methods when the user runs
+    or edits the simulation.
+
+    Arguments:
+    title -- title shown in the window bar.
+    path -- currently loaded circuit definition path, or None for a blank GUI.
+    names -- names.Names instance used for ID/string lookup.
+    devices -- devices.Devices instance containing circuit devices.
+    network -- network.Network instance used to execute the circuit.
+    monitors -- monitors.Monitors instance containing selected traces.
+    net_driver_dict -- parser mapping from net IDs to their driving signals.
 
     Public methods
     --------------
-    on_menu(self, event): Event handler for the file menu.
+    run_cycles(self, cycles): execute the network and record monitor traces.
 
-    on_run_cycles_button(self, event): Event handler for running cycles.
+    load_network_file(self, path): replace the current circuit from a file.
+
+    add_monitor_by_name(self, monitor_name): add a signal to the waveform view.
 
     """
 
     def __init__(self, title, path, names, devices, network, monitors, net_driver_dict):
-        """Initialise widgets and layout."""
+        """Create the frame, controls, menus, and initial simulator view.
+
+        Sets up the window layout, stores simulator references, creates the
+        waveform canvas, binds menu/button/keyboard events, applies the system
+        theme, and disables file-dependent controls when no circuit is loaded.
+
+        """
         # Create the main window and set its starting size
         super().__init__(parent=None, title=title, size=(1200, 750))
         base_font = self.GetFont()
@@ -1158,7 +1270,7 @@ class Gui(wx.Frame):
         self.menu_bar = menu_bar
         self.SetMenuBar(menu_bar)
         self.CreateStatusBar()
-        self.set_status("Ready")
+        self.SetStatusText("Ready")
 
         # Canvas for drawing signals
         self.canvas = MyGLCanvas(self, devices, monitors)
@@ -1252,12 +1364,8 @@ class Gui(wx.Frame):
         self.redo_button = wxbuttons.GenBitmapButton(
             self, wx.ID_ANY, wx.Bitmap(1, 1), size=(28, 28), style=wx.BORDER_NONE
         )
-        self.toggle_theme_button = wxbuttons.GenBitmapButton(
-            self, wx.ID_ANY, wx.Bitmap(1, 1), size=(34, 34)
-        )
         self.undo_button.SetMinSize((28, 28))
         self.redo_button.SetMinSize((28, 28))
-        self.toggle_theme_button.SetMinSize((34, 34))
         self.switch_rows = wx.ScrolledWindow(
             self, wx.ID_ANY, style=wx.VSCROLL | wx.BORDER_SIMPLE
         )
@@ -1322,7 +1430,6 @@ class Gui(wx.Frame):
         )
         self.undo_button.Bind(wx.EVT_BUTTON, self.on_undo_cycle)
         self.redo_button.Bind(wx.EVT_BUTTON, self.on_redo_cycle)
-        self.toggle_theme_button.Bind(wx.EVT_BUTTON, self.on_toggle_theme)
 
         self.Bind(wx.EVT_MENU, self.on_run_cycles_button, id=ID_RUN)
         self.Bind(wx.EVT_MENU, self.on_run_one_cycle, id=ID_RUN_ONE)
@@ -1479,7 +1586,6 @@ class Gui(wx.Frame):
 
         self.undo_button.Reparent(self)
         self.redo_button.Reparent(self)
-        self.toggle_theme_button.Reparent(self)
         history_theme_sizer.Add(
             self.undo_button, 0, wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, 4
         )
@@ -1487,7 +1593,6 @@ class Gui(wx.Frame):
             self.redo_button, 0, wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, 8
         )
         history_theme_sizer.AddStretchSpacer()
-        history_theme_sizer.Add(self.toggle_theme_button, 0)
         side_sizer.Add(history_theme_sizer, 0, wx.EXPAND | wx.BOTTOM, 8)
         side_sizer.Add(simulation_panel, 0, wx.EXPAND | wx.BOTTOM, 8)
         side_sizer.Add(switch_panel, 1, wx.EXPAND | wx.BOTTOM, 8)
@@ -1518,12 +1623,10 @@ class Gui(wx.Frame):
 
         self.Centre()
 
-    ###############################################################################
     # MENU AND SIMULATION EVENT HANDLERS
-    ###############################################################################
 
     def on_menu(self, event):
-        """Handle the event when the user selects a menu item."""
+        """Handle simple menu items that do not need their own event ID binding."""
         Id = event.GetId()
         if Id == wx.ID_EXIT:
             self.Close(True)
@@ -1540,7 +1643,7 @@ class Gui(wx.Frame):
             )
 
     def on_help(self, event):
-        """Show a short guide to the main GUI workflow."""
+        """Show the quick-start workflow for loading and simulating a circuit."""
         wx.MessageBox(
             "1. Open a circuit definition file from File > Open.\n"
             "2. Use the Switches panel to set switch inputs LOW or HIGH.\n"
@@ -1557,7 +1660,7 @@ class Gui(wx.Frame):
         )
 
     def on_keyboard_shortcuts_help(self, event):
-        """Show keyboard shortcuts."""
+        """Show all keyboard shortcuts registered by the accelerator table."""
         wx.MessageBox(
             "F1: quick start help\n"
             "Space: run the selected number of cycles\n"
@@ -1584,7 +1687,7 @@ class Gui(wx.Frame):
         )
 
     def on_syntax_help(self, event):
-        """Show a short summary of the circuit file syntax."""
+        """Show a brief reminder of the circuit definition sections."""
         wx.MessageBox(
             "Circuit files describe devices, connections, and monitors.\n\n"
             "Typical sections define:\n"
@@ -1599,14 +1702,26 @@ class Gui(wx.Frame):
         )
 
     def on_external_documentation(self, event):
-        """Open external documentation in the default browser."""
+        """Open the external project documentation in the default browser."""
         if wx.LaunchDefaultBrowser(EXTERNAL_DOCUMENTATION_URL):
-            self.set_status("Opened external documentation")
+            self.SetStatusText("Opened external documentation")
         else:
             self.show_status("Error: could not open external documentation.")
 
     def run_cycles(self, cycles):
-        """Run the network for the requested number of cycles."""
+        """Run the simulator and record monitor outputs.
+
+        Arguments:
+        cycles -- number of cycles to execute from the current simulator state
+
+        Return True if all cycles executed successfully, otherwise False.
+
+        Clears redo history, records one undo snapshot per cycle, records monitor
+        traces, updates cycle counters, and refreshes inspector/history controls.
+        If network execution fails, restores the snapshot from before the failed
+        cycle.
+
+        """
         if cycles <= 0:
             self.show_status("Error: number of cycles must be positive.")
             return False
@@ -1637,7 +1752,13 @@ class Gui(wx.Frame):
         return True
 
     def get_simulation_snapshot(self):
-        """Return a snapshot of the simulator state before one cycle runs."""
+        """Return enough simulator state to undo or restore one cycle.
+
+        The snapshot stores device outputs and internal counters, monitor traces,
+        cycle counters, and the canvas cycle offset. It deliberately copies trace
+        lists so later simulation changes do not mutate the saved state.
+
+        """
         device_snapshots = []
         for device in self.devices.devices_list:
             device_snapshots.append(
@@ -1663,7 +1784,15 @@ class Gui(wx.Frame):
         }
 
     def restore_simulation_snapshot(self, simulation_snapshot):
-        """Restore a snapshot made by get_simulation_snapshot()."""
+        """Restore simulator state saved by get_simulation_snapshot.
+
+        Arguments:
+        simulation_snapshot -- dictionary returned by get_simulation_snapshot
+
+        Restores device state, monitor traces, cycle counters, and inspector
+        range information.
+
+        """
         for device_snapshot in simulation_snapshot["devices"]:
             device = self.devices.get_device(device_snapshot["device_id"])
 
@@ -1685,14 +1814,14 @@ class Gui(wx.Frame):
         self.update_cycle_inspector_range()
 
     def update_history_buttons(self):
-        """Enable undo and redo buttons only when their history stacks have entries."""
+        """Enable undo and redo only when the matching history stack has entries."""
         if hasattr(self, "undo_button"):
             self.undo_button.Enable(bool(self.simulation_history))
         if hasattr(self, "redo_button"):
             self.redo_button.Enable(bool(self.redo_history))
 
     def get_max_trace_length(self):
-        """Return the longest recorded monitor trace length."""
+        """Return the longest trace length among all selected monitors."""
         max_trace_length = 0
         for monitor in self.monitors.monitors_dictionary.values():
             trace_length = len(monitor.trace)
@@ -1701,7 +1830,13 @@ class Gui(wx.Frame):
         return max_trace_length
 
     def update_cycle_inspector_range(self):
-        """Keep the cycle inspector slider in sync with recorded traces."""
+        """Synchronise the cycle inspector controls with recorded trace data.
+
+        Disables the slider and entry when no trace data exists. Otherwise clamps
+        the selected cycle to the available range and updates the displayed cycle
+        number.
+
+        """
         if not hasattr(self, "cycle_inspector_slider"):
             return
 
@@ -1712,7 +1847,6 @@ class Gui(wx.Frame):
             self.cycle_inspector_slider.Enable(False)
             self.cycle_inspector_entry.SetValue("-")
             self.cycle_inspector_entry.Enable(False)
-            self.update_cycle_inspector_label_width()
             self.canvas.cycle_inspector_index = 0
             return
 
@@ -1725,56 +1859,30 @@ class Gui(wx.Frame):
             self.cycle_inspector_slider.SetRange(0, 1)
         else:
             self.cycle_inspector_slider.SetRange(1, max_trace_length)
-        self.cycle_inspector_slider.SetValue(
-            self.cycle_index_to_slider_value(current_index)
-        )
+        self.cycle_inspector_slider.SetValue(current_index + 1)
         self.cycle_inspector_slider.Enable(True)
         self.cycle_inspector_entry.Enable(True)
         self.canvas.cycle_inspector_index = current_index
         self.update_cycle_inspector_label()
 
     def update_cycle_inspector_label(self):
-        """Show the real cycle number selected by the inspector."""
+        """Show the real cycle number selected by the inspector entry."""
         selected_cycle = (
             self.canvas.cycle_offset + self.canvas.cycle_inspector_index + 1
         )
         if self.cycle_inspector_entry.GetValue() != str(selected_cycle):
             self.cycle_inspector_entry.SetValue(str(selected_cycle))
-        self.update_cycle_inspector_label_width()
-
-    def update_cycle_inspector_label_width(self):
-        """Keep the cycle inspector entry width stable."""
-        if not hasattr(self, "cycle_inspector_entry") or not hasattr(
-            self.cycle_inspector_entry, "SetMinSize"
-        ):
-            return
-
-        self.cycle_inspector_entry.SetMinSize(
-            (CYCLE_INSPECTOR_ENTRY_WIDTH, CYCLE_INSPECTOR_ENTRY_HEIGHT)
-        )
-        if hasattr(self.cycle_inspector_entry, "SetMaxSize"):
-            self.cycle_inspector_entry.SetMaxSize(
-                (CYCLE_INSPECTOR_ENTRY_WIDTH, CYCLE_INSPECTOR_ENTRY_HEIGHT)
-            )
-        if hasattr(self.cycle_inspector_entry, "SetInitialSize"):
-            self.cycle_inspector_entry.SetInitialSize(
-                (CYCLE_INSPECTOR_ENTRY_WIDTH, CYCLE_INSPECTOR_ENTRY_HEIGHT)
-            )
-        if hasattr(self, "cycle_inspector_panel"):
-            self.cycle_inspector_panel.Layout()
-
-    def cycle_index_to_slider_value(self, cycle_index):
-        """Convert a trace list index into the matching slider value."""
-        return cycle_index + 1
-
-    def slider_value_to_cycle_index(self, slider_value):
-        """Convert the slider value back into a trace list index."""
-        if slider_value <= 1:
-            return 0
-        return slider_value - 1
 
     def cycle_number_to_cycle_index(self, cycle_number):
-        """Convert a displayed cycle number into a trace list index."""
+        """Convert a displayed cycle number into a zero-based trace index.
+
+        Arguments:
+        cycle_number -- cycle number shown to the user, including any cycle
+        offset caused by clearing traces.
+
+        Return the nearest valid trace index for the current monitor data.
+
+        """
         max_trace_length = self.get_max_trace_length()
         if max_trace_length <= 0:
             return 0
@@ -1789,7 +1897,7 @@ class Gui(wx.Frame):
         return cycle_number - self.canvas.cycle_offset - 1
 
     def set_cycle_inspector_index(self, cycle_index):
-        """Set the inspected cycle and update the slider and entry."""
+        """Select a trace index for inspection and update the controls."""
         max_trace_length = self.get_max_trace_length()
         if max_trace_length <= 0:
             self.update_cycle_inspector_range()
@@ -1801,18 +1909,16 @@ class Gui(wx.Frame):
             cycle_index = max_trace_length - 1
 
         self.canvas.cycle_inspector_index = cycle_index
-        self.cycle_inspector_slider.SetValue(
-            self.cycle_index_to_slider_value(cycle_index)
-        )
+        self.cycle_inspector_slider.SetValue(cycle_index + 1)
         self.update_cycle_inspector_label()
 
     def show_status(self, message):
-        """Display a status message in the GUI."""
+        """Append a message to the console and status bar."""
         self.append_console_text(message)
-        self.set_status(message)
+        self.SetStatusText(message)
 
     def append_console_text(self, text):
-        """Append console text without leaving a blank trailing line."""
+        """Append text to the console without adding a trailing blank line."""
         if not text:
             return
 
@@ -1821,18 +1927,20 @@ class Gui(wx.Frame):
             self.console_box.AppendText("\n")
         self.console_box.AppendText(text)
 
-    def set_status(self, message):
-        """Display a short status message in the frame status bar."""
-        self.SetStatusText(message)
-
     def update_cycles_completed_text(self):
-        """Update the cycles completed readout."""
+        """Update the cycle counter shown in the Simulation panel."""
         self.cycles_completed_text.SetLabel(
             f"Cycles passed: {self.total_cycles_completed}"
         )
 
     def on_cycle_spin_text(self, event):
-        """Reject typed cycle counts above the per-run maximum."""
+        """Clamp typed cycle counts to the per-run maximum.
+
+        Lets ordinary text editing continue, but when the entered value is above
+        MAX_RUN_CYCLES it sets the spin control back to the maximum and shows a
+        warning.
+
+        """
         raw_cycles_text = ""
         if hasattr(event, "GetString"):
             raw_cycles_text = event.GetString()
@@ -1862,19 +1970,25 @@ class Gui(wx.Frame):
             event.Skip()
 
     def show_max_run_cycles_popup(self):
-        """Show the maximum cycles-per-run message."""
+        """Show the warning used when the cycle spin control exceeds the limit."""
         wx.MessageBox(
             f"You can run at most {MAX_RUN_CYCLES} cycles at a time.",
             "Maximum Cycles",
             wx.ICON_WARNING | wx.OK,
         )
 
-    ###############################################################################
     # ERROR MESSAGE HELPERS
-    ###############################################################################
 
     def monitor_error_message(self, error_type):
-        """Return a user-facing monitor error message."""
+        """Translate a monitor error code into a short GUI message.
+
+        Arguments:
+        error_type -- error code returned by monitors.Monitors
+
+        Return a lowercase message fragment suitable for embedding inside a
+        longer status line.
+
+        """
         # Translate monitor error codes into messages suitable for the GUI
         if error_type == self.monitors.NOT_OUTPUT:
             return "signal is not an output"
@@ -1887,17 +2001,13 @@ class Gui(wx.Frame):
 
         return "unknown monitor error"
 
-    def has_loaded_circuit(self):
-        """Return True when the GUI has a circuit file loaded."""
-        return self.path is not None
-
     def show_no_loaded_circuit_error(self):
-        """Show the shared error for actions that need a loaded circuit."""
+        """Show the shared status error for actions that need a loaded circuit."""
         self.show_status("Error: no circuit loaded. Use File > Open to load one.")
 
     def update_file_dependent_controls(self):
-        """Enable simulation controls only when a circuit file is loaded."""
-        circuit_loaded = self.has_loaded_circuit()
+        """Enable simulation controls only when there is a circuit to run."""
+        circuit_loaded = self.path is not None
         for control_name in [
             "run_cycles_button",
             "live_trace_button",
@@ -1909,9 +2019,9 @@ class Gui(wx.Frame):
                 getattr(self, control_name).Enable(circuit_loaded)
 
     def on_run_cycles_button(self, event):
-        """Run the simulation from its current state."""
+        """Handle the Run cycles button and menu shortcut."""
         self.stop_live_trace()
-        if not self.has_loaded_circuit():
+        if self.path is None:
             self.show_no_loaded_circuit_error()
             return
 
@@ -1924,13 +2034,13 @@ class Gui(wx.Frame):
 
         if self.run_cycles(cycles):
             self.show_status(f"Ran simulation for {cycles} cycles.")
-            self.set_status(f"Ran {cycles} cycles")
+            self.SetStatusText(f"Ran {cycles} cycles")
             self.canvas.render()
 
     def on_run_one_cycle(self, event):
-        """Run the simulation forward by one cycle."""
+        """Run exactly one simulation cycle from the current state."""
         self.stop_live_trace()
-        if not self.has_loaded_circuit():
+        if self.path is None:
             self.show_no_loaded_circuit_error()
             return
 
@@ -1940,11 +2050,11 @@ class Gui(wx.Frame):
 
         if self.run_cycles(1):
             self.show_status("Ran simulation for 1 cycle.")
-            self.set_status("Ran 1 cycle")
+            self.SetStatusText("Ran 1 cycle")
             self.canvas.render()
 
     def on_toggle_live_trace(self, event):
-        """Start or stop live tracing."""
+        """Start, pause, or resume live tracing depending on current state."""
         if self.live_trace_running:
             self.stop_live_trace(show_message=True, keep_paused=True)
         elif self.live_trace_paused:
@@ -1953,8 +2063,15 @@ class Gui(wx.Frame):
             self.start_live_trace()
 
     def start_live_trace(self):
-        """Start automatically advancing the simulation one cycle at a time."""
-        if not self.has_loaded_circuit():
+        """Start automatically advancing the simulation one cycle at a time.
+
+        Return True if live tracing started, otherwise False.
+
+        Validates the circuit, stores the requested cycle budget, starts the wx
+        timer, updates the play/pause button, and reports status to the user.
+
+        """
+        if self.path is None:
             self.show_no_loaded_circuit_error()
             return False
 
@@ -1974,12 +2091,19 @@ class Gui(wx.Frame):
         self.live_trace_timer.Start(self.get_live_trace_interval_ms())
         self.update_live_trace_button()
         self.show_status(f"Started live tracing for {cycles} cycles.")
-        self.set_status(f"Live tracing: 0/{cycles} cycles")
+        self.SetStatusText(f"Live tracing: 0/{cycles} cycles")
         return True
 
     def resume_live_trace(self):
-        """Resume a paused live trace without resetting its cycle budget."""
-        if not self.has_loaded_circuit():
+        """Resume a paused live trace without resetting its cycle budget.
+
+        Return True if tracing resumed or restarted otherwise False.
+
+        Keeps the original target cycle count and continues from the number of
+        live cycles already completed.
+
+        """
+        if self.path is None:
             self.show_no_loaded_circuit_error()
             return False
 
@@ -2001,14 +2125,21 @@ class Gui(wx.Frame):
         self.show_status(
             f"Resumed live tracing with {remaining_cycles} cycles remaining."
         )
-        self.set_status(
+        self.SetStatusText(
             f"Live tracing: {self.live_trace_cycles_completed}/"
             f"{self.live_trace_target_cycles} cycles"
         )
         return True
 
     def stop_live_trace(self, show_message=False, keep_paused=False):
-        """Stop automatically advancing the simulation."""
+        """Stop the live tracing timer.
+
+        Optional arguments:
+        show_message -- if True, tell the user live tracing was paused
+        keep_paused -- if True, remember that the next toggle should resume
+        rather than start a fresh live trace
+
+        """
         if not getattr(self, "live_trace_running", False):
             if not keep_paused:
                 self.live_trace_paused = False
@@ -2021,10 +2152,10 @@ class Gui(wx.Frame):
         self.update_live_trace_button()
         if show_message:
             self.show_status("Paused live tracing.")
-            self.set_status("Live tracing paused")
+            self.SetStatusText("Live tracing paused")
 
     def update_live_trace_button(self):
-        """Keep the live tracing button label in sync with playback state."""
+        """Keep the live tracing button label and icon in sync with playback."""
         if not hasattr(self, "live_trace_button"):
             return
 
@@ -2036,12 +2167,12 @@ class Gui(wx.Frame):
             self.apply_live_trace_button_theme()
 
     def get_live_trace_interval_ms(self):
-        """Return the timer interval for the selected live tracing speed."""
+        """Return the wx timer interval for the selected live tracing speed."""
         speed_multiplier = LIVE_TRACE_SPEEDS[self.live_trace_speed_index][1]
         return int(LIVE_TRACE_INTERVAL_MS / speed_multiplier)
 
     def on_live_trace_speed_button(self, event):
-        """Cycle through available live tracing speeds."""
+        """Cycle to the next live tracing speed."""
         self.live_trace_speed_index = (self.live_trace_speed_index + 1) % len(
             LIVE_TRACE_SPEEDS
         )
@@ -2051,7 +2182,7 @@ class Gui(wx.Frame):
             self.live_trace_timer.Start(self.get_live_trace_interval_ms())
 
     def update_live_trace_speed_button(self):
-        """Keep the live tracing speed button in sync with selected speed."""
+        """Update the live tracing speed button label, tooltip, and theme."""
         if not hasattr(self, "live_trace_speed_button"):
             return
 
@@ -2063,7 +2194,7 @@ class Gui(wx.Frame):
             self.apply_live_trace_speed_button_theme()
 
     def on_live_trace_timer(self, event):
-        """Advance the live trace by one simulation cycle."""
+        """Advance live tracing by one cycle when the wx timer fires."""
         if not self.network.check_network():
             self.stop_live_trace()
             self.show_status("Error: network is incomplete.")
@@ -2071,11 +2202,11 @@ class Gui(wx.Frame):
 
         if not self.run_cycles(1):
             self.stop_live_trace()
-            self.set_status("Live tracing stopped")
+            self.SetStatusText("Live tracing stopped")
             return
 
         self.live_trace_cycles_completed += 1
-        self.set_status(
+        self.SetStatusText(
             f"Live tracing: {self.live_trace_cycles_completed}/"
             f"{self.live_trace_target_cycles} cycles"
         )
@@ -2087,10 +2218,12 @@ class Gui(wx.Frame):
             self.stop_live_trace()
             self.live_trace_paused = False
             self.show_status(f"Completed live tracing for {completed_cycles} cycles.")
-            self.set_status(f"Completed live tracing for {completed_cycles} cycles.")
+            self.SetStatusText(
+                f"Completed live tracing for {completed_cycles} cycles."
+            )
 
     def on_undo_cycle(self, event):
-        """Undo the most recent simulation cycle."""
+        """Restore the simulator state from before the most recent cycle."""
         self.stop_live_trace()
         if not self.simulation_history:
             self.show_status("Error: no simulation cycle to undo.")
@@ -2105,7 +2238,7 @@ class Gui(wx.Frame):
         self.show_status("Undid 1 cycle.")
 
     def on_redo_cycle(self, event):
-        """Redo the most recently undone simulation cycle."""
+        """Replay the most recently undone cycle snapshot."""
         self.stop_live_trace()
         if not self.redo_history:
             self.show_status("Error: no simulation cycle to redo.")
@@ -2120,9 +2253,9 @@ class Gui(wx.Frame):
         self.show_status("Redid 1 cycle.")
 
     def on_reset_button(self, event):
-        """Reset the simulation state and traces."""
+        """Cold-start the circuit and clear all recorded trace history."""
         self.stop_live_trace()
-        if not self.has_loaded_circuit():
+        if self.path is None:
             self.show_no_loaded_circuit_error()
             return
 
@@ -2142,9 +2275,15 @@ class Gui(wx.Frame):
         self.show_status("Reset simulation.")
 
     def on_clear_traces(self, event):
-        """Clear waveform traces while keeping the selected monitors."""
+        """Clear waveform history without resetting switch/device state.
+
+        Keeps selected monitors, preserves the total cycle count for future CSV
+        and axis labels, resets undo/redo history, and returns the waveform view
+        to its default pan/zoom,
+
+        """
         self.stop_live_trace()
-        if not self.has_loaded_circuit():
+        if self.path is None:
             self.show_no_loaded_circuit_error()
             return
 
@@ -2155,55 +2294,60 @@ class Gui(wx.Frame):
         self.redo_history = []
         self.canvas.cycle_offset = self.total_cycles_completed
         self.update_cycles_completed_text()
+        self.canvas.reset_view()
         self.update_cycle_inspector_range()
         self.canvas.render()
         self.update_history_buttons()
         self.show_status("Cleared traces.")
 
     def on_clear_status(self, event):
-        """Clear the console history."""
+        """Clear the GUI console and return the status bar to Ready."""
         self.console_box.SetValue("")
-        self.set_status("Ready")
+        self.SetStatusText("Ready")
 
     def on_zoom_in(self, event):
-        """Zoom into the waveform display."""
-        self.canvas.zoom_in()
-        self.set_status("Zoomed in")
+        """Zoom into the waveform display from the View menu or shortcut."""
+        self.canvas.zoom_at_canvas_centre(1.25)
+        self.SetStatusText("Zoomed in")
 
     def on_zoom_out(self, event):
-        """Zoom out of the waveform display."""
-        self.canvas.zoom_out()
-        self.set_status("Zoomed out")
+        """Zoom out of the waveform display from the View menu or shortcut."""
+        self.canvas.zoom_at_canvas_centre(0.8)
+        self.SetStatusText("Zoomed out")
 
     def on_reset_view(self, event):
-        """Reset the waveform view."""
+        """Reset waveform pan and zoom from the view menu or shortcut."""
         self.canvas.reset_view()
-        self.set_status("Reset view")
+        self.SetStatusText("Reset view")
 
     def on_toggle_cycle_inspector(self, event):
-        """Show or hide the cycle inspector slider."""
+        """Show or hide the cycle inspector controls and canvas cursor."""
         inspector_is_visible = self.cycle_inspector_menu_item.IsChecked()
         self.canvas.cycle_inspector_enabled = inspector_is_visible
 
         if inspector_is_visible:
             self.update_cycle_inspector_range()
             self.cycle_inspector_panel.Show()
-            self.set_status("Shown cycle inspector")
+            self.SetStatusText("Shown cycle inspector")
         else:
             self.cycle_inspector_panel.Hide()
-            self.set_status("Hidden cycle inspector")
+            self.SetStatusText("Hidden cycle inspector")
 
         self.Layout()
         self.canvas.render()
 
     def on_cycle_inspector_slider(self, event):
-        """Update the inspected cycle from the slider."""
+        """Update the inspected cycle when the slider is moved."""
         slider_value = self.cycle_inspector_slider.GetValue()
-        self.set_cycle_inspector_index(self.slider_value_to_cycle_index(slider_value))
+        if slider_value <= 1:
+            cycle_index = 0
+        else:
+            cycle_index = slider_value - 1
+        self.set_cycle_inspector_index(cycle_index)
         self.canvas.render()
 
     def on_cycle_inspector_entry(self, event):
-        """Jump to the cycle typed into the cycle inspector."""
+        """Jump to the cycle typed into the cycle inspector entry."""
         try:
             cycle_number = int(self.cycle_inspector_entry.GetValue())
 
@@ -2219,7 +2363,7 @@ class Gui(wx.Frame):
             event.Skip()
 
     def on_toggle_theme(self, event):
-        """Switch between light and dark mode."""
+        """Switch between the built-in light and dark colour themes."""
         if self.theme_name == "dark":
             self.theme_name = "light"
         else:
@@ -2229,14 +2373,14 @@ class Gui(wx.Frame):
         self.show_status(f"Switched to {self.theme_name} mode.")
 
     def on_close_section(self, event):
-        """Hide one side panel section."""
+        """Hide the section whose close button was clicked."""
         section_name = event.GetEventObject().GetName()
         self.section_panels[section_name].Hide()
         self.update_section_window_menu()
         self.Layout()
 
     def on_show_section(self, event):
-        """Show or hide one side panel section from the Window menu."""
+        """Show or hide one section from the Window menu."""
         menu_id = event.GetId()
         if menu_id == ID_SHOW_AVAILABLE_SIGNALS:
             section_name = "available_signals"
@@ -2252,7 +2396,7 @@ class Gui(wx.Frame):
         self.Layout()
 
     def on_open_file(self, event):
-        """Load a new circuit definition file into the current GUI."""
+        """Ask the user for a circuit file and load it into this window."""
         with wx.FileDialog(
             self,
             "Open circuit definition",
@@ -2263,7 +2407,7 @@ class Gui(wx.Frame):
                 self.load_network_file(file_dialog.GetPath())
 
     def on_export_image(self, event):
-        """Save the waveform display as a PNG image."""
+        """Ask for a PNG path and export the current waveform display."""
         if not self.monitors.monitors_dictionary:
             self.show_status("Error: no monitors to export.")
             return
@@ -2285,7 +2429,7 @@ class Gui(wx.Frame):
                     self.show_status("Error: could not export waveform image.")
 
     def on_export_csv(self, event):
-        """Save monitor traces as a CSV file."""
+        """Ask for a CSV path and export the recorded monitor traces."""
         if not self.monitors.monitors_dictionary:
             self.show_status("Error: no monitor traces to export.")
             return
@@ -2309,12 +2453,18 @@ class Gui(wx.Frame):
                 except OSError as error:
                     self.show_status(f"Error: could not export CSV: {error}.")
 
-    ###############################################################################
     # GUI HELPER FUNCTIONS
-    ###############################################################################
 
     def create_section_panel(self, title, section_name):
-        """Create one side panel section with a close button."""
+        """Create a titled GUI section with a close button.
+
+        arguments:
+        title -- text displayed in the section header
+        section_name -- stable key used by the window menu and close handler
+
+        Return the panel and the body sizer where callers should add content.
+
+        """
         panel = wx.Panel(self, wx.ID_ANY, style=wx.BORDER_SIMPLE)
         panel_sizer = wx.BoxSizer(wx.VERTICAL)
         header_sizer = wx.BoxSizer(wx.HORIZONTAL)
@@ -2344,12 +2494,12 @@ class Gui(wx.Frame):
         return panel, body_sizer
 
     def update_section_window_menu(self):
-        """Tick Window menu items for panels that are visible."""
+        """Tick Window menu items to match the current panel visibility."""
         for section_name, menu_item in self.window_menu_items.items():
             menu_item.Check(self.section_panels[section_name].IsShown())
 
     def get_system_theme_name(self):
-        """Return the OS light/dark appearance when wx exposes it."""
+        """Return the OS light/dark appearance, falling back to colour brightness."""
         if hasattr(wx.SystemSettings, "GetAppearance"):
             appearance = wx.SystemSettings.GetAppearance()
             if appearance.IsDark():
@@ -2367,7 +2517,12 @@ class Gui(wx.Frame):
         return "light"
 
     def apply_theme(self):
-        """Apply the current light/dark theme to the GUI."""
+        """Apply the selected colour theme to the whole window.
+
+        Updates the canvas palette, menu labels, icons, panels, text controls,
+        switch rows, monitor rows, and history/live-trace buttons.
+
+        """
         self.theme = THEMES[self.theme_name]
         self.canvas.theme = self.theme
         self.canvas.init = False
@@ -2391,7 +2546,6 @@ class Gui(wx.Frame):
         )
         self.apply_live_trace_button_theme()
         self.apply_live_trace_speed_button_theme()
-        self.apply_theme_toggle_button()
 
         self.SetBackgroundColour(self.theme["frame_bg"])
         self.apply_theme_to_text_box(self.console_box)
@@ -2432,7 +2586,7 @@ class Gui(wx.Frame):
         self.canvas.Refresh()
 
     def apply_theme_to_control(self, control):
-        """Apply theme colours to a wx control."""
+        """Apply the current theme to one wx control."""
         if isinstance(control, wx.SpinCtrl):
             control.SetBackgroundColour(self.theme["panel_bg"])
             control.SetForegroundColour(self.theme["text"])
@@ -2451,7 +2605,7 @@ class Gui(wx.Frame):
         control.Refresh()
 
     def apply_theme_to_text_box(self, text_box):
-        """Apply theme colours to existing and future text in a text box."""
+        """Apply theme colours to both existing and future text in a text box."""
         text_box.SetBackgroundColour(self.theme["status_bg"])
         text_box.SetForegroundColour(self.theme["status_text"])
         text_style = wx.TextAttr(self.theme["status_text"], self.theme["status_bg"])
@@ -2465,7 +2619,15 @@ class Gui(wx.Frame):
         text_box.Update()
 
     def load_icon_bitmap(self, icon_path, size):
-        """Return a scaled bitmap for an icon path, or None if it cannot load."""
+        """Load and cache a square icon bitmap.
+
+        Arguments:
+        icon_path -- path to the image file
+        size -- requested width and height in pixels
+
+        Return a wx.Bitmap or None if the icon cannot be loaded.
+
+        """
         cache_key = (icon_path, size)
         if not hasattr(self, "icon_bitmap_cache"):
             self.icon_bitmap_cache = {}
@@ -2485,7 +2647,7 @@ class Gui(wx.Frame):
         return bitmap
 
     def apply_history_button_theme(self, button, icon_path, tooltip):
-        """Apply icon and colours to an undo or redo button."""
+        """Apply the shared compact icon style to an undo or redo button."""
         button.SetBackgroundColour(self.theme["frame_bg"])
         button.SetForegroundColour(self.theme["text"])
         button.SetToolTip(tooltip)
@@ -2507,38 +2669,8 @@ class Gui(wx.Frame):
 
         button.Refresh()
 
-    def apply_theme_toggle_button(self):
-        """Apply icon to the day/night mode button."""
-        if self.theme_name == "dark":
-            icon_path = LIGHT_MODE_ICON_PATH
-            fallback_label = "Light"
-            tooltip = "Switch to light mode"
-        else:
-            icon_path = DARK_MODE_ICON_PATH
-            fallback_label = "Dark"
-            tooltip = "Switch to dark mode"
-
-        bitmap = self.load_icon_bitmap(icon_path, 20)
-        self.toggle_theme_button.SetToolTip(tooltip)
-        self.toggle_theme_button.SetBackgroundColour(self.theme["button_bg"])
-        self.toggle_theme_button.SetForegroundColour(self.theme["text"])
-
-        if hasattr(self.toggle_theme_button, "SetBezelWidth"):
-            self.toggle_theme_button.SetBezelWidth(0)
-        if hasattr(self.toggle_theme_button, "SetUseFocusIndicator"):
-            self.toggle_theme_button.SetUseFocusIndicator(False)
-
-        if bitmap is not None:
-            self.toggle_theme_button.SetLabel("")
-            self.toggle_theme_button.SetBitmapLabel(bitmap)
-        else:
-            self.toggle_theme_button.SetLabel(fallback_label)
-            self.toggle_theme_button.SetBitmapLabel(wx.Bitmap(1, 1))
-
-        self.toggle_theme_button.Refresh()
-
     def apply_live_trace_button_theme(self):
-        """Apply the current play/pause icon to the live tracing button."""
+        """Apply the play or pause icon that matches live tracing state."""
         if self.live_trace_running:
             fallback_label = "Pause"
             tooltip = "Pause live tracing"
@@ -2576,7 +2708,7 @@ class Gui(wx.Frame):
         self.live_trace_button.Refresh()
 
     def apply_live_trace_speed_button_theme(self):
-        """Apply theme colours to the live tracing speed button."""
+        """Apply theme colours and tooltip text to the live tracing speed button."""
         if not hasattr(self, "live_trace_speed_button"):
             return
 
@@ -2596,7 +2728,7 @@ class Gui(wx.Frame):
         self.live_trace_speed_button.Refresh()
 
     def apply_close_button_theme(self, button):
-        """Apply colours to a small close button."""
+        """Apply the small section-close icon style to a button."""
         button.SetBackgroundColour(self.theme["frame_bg"])
         button.SetForegroundColour(self.theme["text"])
 
@@ -2623,7 +2755,7 @@ class Gui(wx.Frame):
         button.Update()
 
     def set_collapsible_pane_colours(self, collapsible_pane):
-        """Set colours for a native collapsible pane."""
+        """Apply theme colours to a wx.CollapsiblePane and its children."""
         collapsible_pane.SetBackgroundColour(self.theme["panel_bg"])
 
         # wx draws the collapsible header itself
@@ -2646,7 +2778,7 @@ class Gui(wx.Frame):
     def update_switch_state_buttons(
         self, low_button, high_button, low_label, high_label, switch_value
     ):
-        """Colour the two middle buttons and side labels."""
+        """Colour a switch row so LOW or HIGH appears selected."""
         if switch_value == 1:
             high_button.SetBackgroundColour(self.theme["toggle_on"])
             low_button.SetBackgroundColour(self.theme["toggle_off"])
@@ -2666,7 +2798,7 @@ class Gui(wx.Frame):
         high_label.Refresh()
 
     def refresh_switch_rows(self):
-        """Update existing switch controls without rebuilding the switch panel."""
+        """Refresh switch colours without rebuilding the whole switch panel."""
         refreshed_low_buttons = set()
 
         for (
@@ -2691,7 +2823,19 @@ class Gui(wx.Frame):
             refreshed_low_buttons.add(low_button.GetId())
 
     def load_network_file(self, path):
-        """Parse a circuit file and replace the current simulator state."""
+        """Parse a circuit file and replace the current simulator state.
+
+        Arguments:
+        path -- path to the circuit definition file to load
+
+        Return True if parsing succeeded and the GUI was refreshed, otherwise
+        False.
+
+        Creates fresh Names, Devices, Network, and Monitors objects, captures
+        parser diagnostics for the console, resets run history, updates every
+        circuit-dependent panel, and resets the waveform view.
+
+        """
         self.stop_live_trace()
         names = Names()
         devices = Devices(names)
@@ -2745,7 +2889,16 @@ class Gui(wx.Frame):
         return True
 
     def export_traces_to_csv(self, file_path):
-        """Write monitor traces to a CSV file."""
+        """Write monitor traces to a CSV file.
+
+        Arguments:
+        file_path -- destination path for the CSV file
+
+        Writes one row per recorded cycle. The cycle column uses the canvas
+        cycle offset so exported traces remain correctly numbered after Clear
+        traces.
+
+        """
         monitor_list = list(self.monitors.monitors_dictionary.values())
         max_trace_length = 0
 
@@ -2770,7 +2923,7 @@ class Gui(wx.Frame):
                 writer.writerow(row)
 
     def signal_to_csv_text(self, signal):
-        """Return a readable signal value for CSV export."""
+        """Return the CSV text representation of one simulator signal value."""
         if signal == self.devices.HIGH:
             return "1"
         if signal == self.devices.LOW:
@@ -2784,7 +2937,12 @@ class Gui(wx.Frame):
         return str(signal)
 
     def get_switch_names(self):
-        """Return a list of all switch device names."""
+        """Return switch names that should be visible in the GUI.
+
+        Internal parser-created switches whose names begin with @ are
+        filtered out because they are implementation details, not user controls.
+
+        """
         switch_names = []
 
         # Do not show internal switches made by the parser
@@ -2798,7 +2956,16 @@ class Gui(wx.Frame):
         return switch_names
 
     def get_signal_ids(self, signal_name):
-        """Return device and port IDs for an existing signal name."""
+        """Resolve a GUI signal name into simulator device and output IDs.
+
+        Arguments:
+        signal_name -- signal name shown to the user using dot notation for
+        output ports
+
+        Return [device_id, port_id] for a valid monitorable output or None
+        if the name cannot be resolved.
+
+        """
         # Using query rather than lookup so invalid GUI input does not create
         # names
         name_parts = signal_name.split(".")
@@ -2863,7 +3030,13 @@ class Gui(wx.Frame):
         return [device_id, port_id]
 
     def get_output_signal_names(self):
-        """Return GUI-facing names for all output signals in the network."""
+        """Return GUI-facing names for all monitorable output signals.
+
+        Real device outputs keep their device.port form. Module port nets are
+        converted from parser arrow notation to a friendlier dotted final port,
+        for example 'TL_CTRL->GREEN' becomes 'TL_CTRL.GREEN'.
+
+        """
         signal_names = []
 
         # Populate the monitor dropdown from real device outputs only
@@ -2902,7 +3075,7 @@ class Gui(wx.Frame):
         return signal_names
 
     def get_module_signal_groups(self):
-        """Return internal module output signals as a nested tree."""
+        """Return module output signals grouped into a nested display tree."""
         module_signal_groups = {}
 
         # The parser names internal module signals with ->
@@ -2917,7 +3090,7 @@ class Gui(wx.Frame):
         return module_signal_groups
 
     def get_top_level_signal_names(self):
-        """Return output signals that are not inside an expanded module."""
+        """Return monitorable output signals that are not inside a module path."""
         signal_names = []
 
         for signal_name in self.get_output_signal_names():
@@ -2927,7 +3100,7 @@ class Gui(wx.Frame):
         return signal_names
 
     def update_switch_rows(self):
-        """Refresh the switch list."""
+        """Rebuild the switch panel from the current circuit."""
         # Clear the old rows and rebuild them
         self.switch_rows_sizer.Clear(delete_windows=True)
         self.switch_state_buttons = {}
@@ -2945,7 +3118,15 @@ class Gui(wx.Frame):
         self.switch_rows.FitInside()
 
     def add_switch_row(self, switch_name):
-        """Add one switch row with LOW/HIGH state buttons."""
+        """Add one switch row with LOW/HIGH state buttons.
+
+        Arguments:
+        switch_name -- visible switch device name from get_switch_names
+
+        Stores both button IDs in switch_state_buttons so either button can be
+        mapped back to the same switch row.
+
+        """
         switch_id = self.names.query(switch_name)
         device = self.devices.get_device(switch_id)
 
@@ -2998,7 +3179,12 @@ class Gui(wx.Frame):
         self.switch_rows_sizer.Add(row_sizer, 0, wx.EXPAND | wx.ALL, 4)
 
     def update_module_signal_rows(self):
-        """Refresh the available monitor signal list."""
+        """Rebuild the available signal list while preserving pane position.
+
+        Saves expanded module panes, rebuilds top-level and nested module signal
+        rows, restores scroll position, refreshes the scrolled area,
+
+        """
         # The list is rebuilt when the available signals really change
         # Save open/closed pane state first so user navigation is not lost
         self.store_module_signal_pane_state()
@@ -3044,7 +3230,18 @@ class Gui(wx.Frame):
     def add_module_signal_group_rows(
         self, parent, parent_sizer, signal_group, parent_path
     ):
-        """Add nested module panes and signal rows to a sizer."""
+        """Add nested module panes and their signal rows to a sizer.
+
+        Arguments:
+        parent -- wx parent for rows and panes at this level
+        parent_sizer -- sizer receiving the rows for this level
+        signal_group -- nested signal tree for this module level
+        parent_path -- tuple naming the current module path
+
+        Builds collapsible panes recursively and records pane IDs so expansion
+        state can survive later rebuilds.
+
+        """
         for signal_name, full_signal_name in sorted(
             signal_group.get("signals_at_this_level", [])
         ):
@@ -3108,7 +3305,7 @@ class Gui(wx.Frame):
             )
 
     def store_module_signal_pane_state(self):
-        """Remember which module panes are expanded before rebuilding."""
+        """Remember expanded module panes before the signal list is rebuilt."""
         for pane, module_path in self.module_signal_pane_paths.values():
             if pane.IsExpanded():
                 self.module_signal_expanded_paths.add(module_path)
@@ -3118,7 +3315,16 @@ class Gui(wx.Frame):
     def add_available_signal_row(
         self, parent, parent_sizer, label_text, signal_name, indent=0
     ):
-        """Add one available signal row with a monitor action."""
+        """Add one available signal row with an Add/Remove action button.
+
+        Arguments:
+        parent -- wx parent containing the row
+        parent_sizer -- sizer receiving the row
+        label_text -- text shown beside the action button
+        signal_name -- full internal signal name used for monitor actions
+        indent -- optional left spacer for nested module signals
+
+        """
         row_sizer = wx.BoxSizer(wx.HORIZONTAL)
         label = wx.StaticText(parent, wx.ID_ANY, label_text, style=wx.ST_ELLIPSIZE_END)
         label.SetMinSize((SIGNAL_LABEL_MIN_WIDTH, -1))
@@ -3154,7 +3360,7 @@ class Gui(wx.Frame):
         parent_sizer.Add(row_sizer, 0, wx.EXPAND | wx.ALL, 4)
 
     def update_available_signal_button(self, button, signal_name):
-        """Set one available signal button to Add or Remove."""
+        """Set one available signal button to the correct Add/Remove state."""
         # The same button changes job after it is clicked so remove the old
         # event binding before attaching the new add or remove handler
         button.Unbind(wx.EVT_BUTTON)
@@ -3196,11 +3402,16 @@ class Gui(wx.Frame):
         button.Refresh()
 
     def is_signal_monitored(self, signal_name):
-        """Return True if a signal name is currently monitored."""
+        """Return True if a signal is already present in the monitor dictionary."""
         return signal_name in self.monitors.monitors_dictionary
 
     def update_monitor_rows(self):
-        """Refresh the active monitor list."""
+        """Rebuild the legacy active monitor list.
+
+        The visible monitor picker is now the available signal panel but this
+        list is still maintained for older code paths and tests.
+
+        """
         # Clear the old rows and rebuild them
         self.monitor_rows_sizer.Clear(delete_windows=True)
         self.monitor_button_keys = {}
@@ -3230,7 +3441,7 @@ class Gui(wx.Frame):
         self.monitor_rows.FitInside()
 
     def on_remove_monitor_row_button(self, event):
-        """Remove a monitor from the active monitor list."""
+        """Remove a monitor selected from the active monitor list."""
         button_id = event.GetId()
         monitor_name = self.monitor_button_keys[button_id]
 
@@ -3242,12 +3453,10 @@ class Gui(wx.Frame):
         self.update_monitor_rows()
         self.canvas.render()
 
-    ###############################################################################
     # SWITCH AND MONITOR EVENT HANDLERS
-    ###############################################################################
 
     def on_switch_state_button(self, event):
-        """Handle the event when the user clicks LOW or HIGH."""
+        """Handle a LOW/HIGH button click in the switch panel."""
         switch_name, switch_value, low_button, high_button, low_label, high_label = (
             self.switch_state_buttons[event.GetId()]
         )
@@ -3261,7 +3470,16 @@ class Gui(wx.Frame):
         self.set_switch_value(switch_name, switch_value)
 
     def set_switch_value(self, switch_name, switch_value):
-        """Set one switch to LOW or HIGH."""
+        """Set one switch to LOW or HIGH.
+
+        Arguments:
+        switch_name -- visible switch name.
+        switch_value -- simulator value, 0 for LOW or 1 for HIGH
+
+        Updates the Devices switch state and clears undo/redo history because
+        previous snapshots no longer represent the same input conditions.
+
+        """
         switch_id = self.names.query(switch_name)
 
         if switch_id is None:
@@ -3284,7 +3502,7 @@ class Gui(wx.Frame):
             self.show_status(f"Error: could not set {switch_name}.")
 
     def on_module_signal_pane_changed(self, event):
-        """Resize the module signal list without resizing the main frame."""
+        """Record a module pane expansion change and refit the scrolled list."""
         pane = event.GetEventObject()
         pane_data = self.module_signal_pane_paths.get(pane.GetId())
         if pane_data is not None:
@@ -3298,7 +3516,7 @@ class Gui(wx.Frame):
         self.module_signal_rows.FitInside()
 
     def on_add_module_signal_button(self, event):
-        """Add a monitor from the available signal list."""
+        """Add the signal attached to an available-list action button."""
         button_id = event.GetId()
         signal_name = self.module_signal_button_names[button_id]
 
@@ -3310,7 +3528,7 @@ class Gui(wx.Frame):
         self.module_signal_rows.Scroll(scroll_x, scroll_y)
 
     def on_delete_module_signal_button(self, event):
-        """Remove a monitor from the available signal list."""
+        """Remove the signal attached to an available-list action button."""
         self.stop_live_trace()
         button_id = event.GetId()
         signal_name = self.module_signal_button_names[button_id]
@@ -3333,7 +3551,19 @@ class Gui(wx.Frame):
         self.canvas.render()
 
     def add_monitor_by_name(self, monitor_name, refresh_available_signals=True):
-        """Add the named signal to the monitor list."""
+        """Add a named signal to the monitor list.
+
+        Arguments:
+        monitor_name -- GUI-facing signal name to monitor
+        refresh_available_signals -- if True, rebuild the available signal list
+        after adding the monitor; button handlers pass False and update only the
+        clicked row to preserve scroll position.
+
+        Resolves the display name to simulator IDs, pads new traces for cycles
+        already recorded, clears undo/redo history, updates monitor controls,
+        redraws the waveform.
+
+        """
         self.stop_live_trace()
 
         if not monitor_name:
