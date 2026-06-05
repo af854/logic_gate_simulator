@@ -149,6 +149,7 @@ ID_SHOW_SIMULATION = wx.NewIdRef()
 ID_SHOW_SWITCHES = wx.NewIdRef()
 ID_SHOW_CONSOLE = wx.NewIdRef()
 ID_TOGGLE_3D = wx.NewIdRef()
+ID_TOGGLE_MULTISAMPLE = wx.NewIdRef()
 
 
 MAX_RUN_CYCLES = 1000
@@ -1249,6 +1250,10 @@ class Gui(wx.Frame):
         self.view_3d_menu_item = view_menu.AppendCheckItem(
             ID_TOGGLE_3D, "Enable 3D view\tCtrl+D"
         )
+        self.view_aa_menu_item = view_menu.AppendCheckItem(
+            ID_TOGGLE_MULTISAMPLE, "Enable 3D anti-aliasing"
+        )
+        self.view_aa_menu_item.Check(True)
         view_menu.AppendSeparator()
 
         if self.theme_name == "dark":
@@ -1500,10 +1505,17 @@ class Gui(wx.Frame):
         self.section_titles = {}
         self.section_close_buttons = {}
 
+        self.side_splitter = wx.SplitterWindow(
+            self, style=wx.SP_LIVE_UPDATE | wx.SP_NOBORDER
+        )
+        self.side_splitter.SetMinimumPaneSize(120)
+
         simulation_panel, simulation_sizer = self.create_section_panel(
             "Simulation", "simulation"
         )
+        simulation_panel.Reparent(self.side_splitter)
         simulation_panel.SetMinSize((SIMULATION_PANEL_WIDTH, -1))
+
         self.spin = wx.SpinCtrl(simulation_panel, wx.ID_ANY, "10")
         self.spin.SetRange(1, MAX_RUN_CYCLES)
         self.spin.SetMinSize((CYCLE_SPIN_WIDTH, -1))
@@ -1531,9 +1543,15 @@ class Gui(wx.Frame):
         simulation_sizer.Add(self.clear_traces_button, 0, wx.EXPAND | wx.ALL, 6)
 
         switch_panel, switch_sizer = self.create_section_panel("Switches", "switches")
+        switch_panel.Reparent(self.side_splitter)
         switch_panel.SetMinSize((SIDE_PANEL_WIDTH, 230))
         self.switch_rows.Reparent(switch_panel)
         switch_sizer.Add(self.switch_rows, 1, wx.EXPAND | wx.ALL, 6)
+
+        self.side_splitter.SplitHorizontally(
+            simulation_panel, switch_panel, sashPosition=250
+        )
+        self.side_splitter.SetSashGravity(0.0)
 
         signal_panel, signal_sizer = self.create_section_panel(
             "Available signals", "available_signals"
@@ -1576,8 +1594,9 @@ class Gui(wx.Frame):
         )
         history_theme_sizer.AddStretchSpacer()
         side_sizer.Add(history_theme_sizer, 0, wx.EXPAND | wx.BOTTOM, 8)
-        side_sizer.Add(simulation_panel, 0, wx.EXPAND | wx.BOTTOM, 8)
-        side_sizer.Add(switch_panel, 1, wx.EXPAND | wx.BOTTOM, 8)
+
+        # Add the single splitter to the side sizer instead of the two panels
+        side_sizer.Add(self.side_splitter, 1, wx.EXPAND | wx.BOTTOM, 8)
 
         main_sizer.Add(signal_panel, 0, wx.EXPAND | wx.ALL, 8)
         main_sizer.Add(canvas_sizer, 4, wx.EXPAND | wx.ALL, 5)
@@ -1655,6 +1674,9 @@ class Gui(wx.Frame):
             "Ctrl+I: Show or hide cycle inspector\n"
             "Ctrl+Shift+P: Export waveform as PNG\n"
             "Ctrl+Shift+E: Export traces as CSV\n"
+            "1 or F: Snap the 3D view to the front\n"
+            "2 or R: Reset the 3D camera to the default view\n"
+            "B: Cycle the 3D trace background display mode\n"
             "Ctrl+1: Show Available Signals panel\n"
             "Ctrl+2: Show Simulation panel\n"
             "Ctrl+3: Show Switches panel\n"
@@ -2273,6 +2295,18 @@ class Gui(wx.Frame):
         self.Refresh()
         self.active_canvas.render()
 
+    def on_toggle_multisample(self, event):
+        """Toggle multisample antialiasing for the 3D canvas."""
+        if not hasattr(self, "canvas_3d"):
+            return
+
+        new_state = not self.canvas_3d.multisample_enabled
+        self.canvas_3d.set_multisample(new_state)
+        self.view_aa_menu_item.Check(new_state)
+        self.show_status(f"3D antialiasing {'enabled' if new_state else 'disabled'}")
+        if self.view_3d_menu_item.IsChecked():
+            self.active_canvas.render()
+
     def on_reset_button(self, event):
         """Cold-start the circuit and clear all recorded trace history."""
         self.stop_live_trace()
@@ -2292,8 +2326,8 @@ class Gui(wx.Frame):
 
         if hasattr(self.active_canvas, "reset_view"):
             self.active_canvas.reset_view()
-        elif hasattr(self.active_canvas, "snap_side_view"):
-            self.active_canvas.snap_side_view()
+        elif hasattr(self.active_canvas, "snap_reset_view"):
+            self.active_canvas.snap_reset_view()
 
         self.update_cycle_inspector_range()
         self.active_canvas.render()
@@ -2323,8 +2357,8 @@ class Gui(wx.Frame):
 
         if hasattr(self.active_canvas, "reset_view"):
             self.active_canvas.reset_view()
-        elif hasattr(self.active_canvas, "snap_side_view"):
-            self.active_canvas.snap_side_view()
+        elif hasattr(self.active_canvas, "snap_reset_view"):
+            self.active_canvas.snap_reset_view()
 
         self.update_cycle_inspector_range()
         self.active_canvas.render()
@@ -2360,8 +2394,8 @@ class Gui(wx.Frame):
         """Reset waveform pan and zoom from the view menu or shortcut."""
         if hasattr(self.active_canvas, "reset_view"):
             self.active_canvas.reset_view()
-        elif hasattr(self.active_canvas, "snap_side_view"):
-            self.active_canvas.snap_side_view()
+        elif hasattr(self.active_canvas, "snap_reset_view"):
+            self.active_canvas.snap_reset_view()
         self.SetStatusText("Reset view")
 
     def on_toggle_cycle_inspector(self, event):
@@ -2419,7 +2453,17 @@ class Gui(wx.Frame):
     def on_close_section(self, event):
         """Hide the section whose close button was clicked."""
         section_name = event.GetEventObject().GetName()
-        self.section_panels[section_name].Hide()
+        panel = self.section_panels[section_name]
+
+        # If the panel is inside the splitter, unsplit it safely
+        if section_name in ["simulation", "switches"]:
+            if self.side_splitter.IsSplit():
+                self.side_splitter.Unsplit(panel)
+            else:
+                self.side_splitter.Hide()  # Hide the whole splitter if the last pane is closed
+        else:
+            panel.Hide()
+
         self.update_section_window_menu()
         self.Layout()
 
@@ -2435,7 +2479,38 @@ class Gui(wx.Frame):
         else:
             section_name = "console"
 
-        self.section_panels[section_name].Show(event.IsChecked())
+        panel = self.section_panels[section_name]
+        is_showing = event.IsChecked()
+
+        # Handle splitter panels
+        if section_name in ["simulation", "switches"]:
+            if is_showing:
+                self.side_splitter.Show()
+                other_name = (
+                    "switches" if section_name == "simulation" else "simulation"
+                )
+                other_panel = self.section_panels[other_name]
+
+                if other_panel.IsShown():
+                    # Both panels are visible, split them
+                    if not self.side_splitter.IsSplit():
+                        self.side_splitter.SplitHorizontally(
+                            self.section_panels["simulation"],
+                            self.section_panels["switches"],
+                            sashPosition=250,
+                        )
+                else:
+                    # Only one panel is visible, initialize it full-size
+                    self.side_splitter.Initialize(panel)
+            else:
+                if self.side_splitter.IsSplit():
+                    self.side_splitter.Unsplit(panel)
+                else:
+                    self.side_splitter.Hide()
+        # Handle standard panels
+        else:
+            panel.Show(is_showing)
+
         self.update_section_window_menu()
         self.Layout()
 
@@ -2615,6 +2690,7 @@ class Gui(wx.Frame):
             self.switch_rows,
             self.module_signal_rows,
             self.monitor_rows,
+            self.side_splitter,
         ]
 
         for control in themed_controls:
@@ -2928,7 +3004,7 @@ class Gui(wx.Frame):
         self.canvas_3d.devices = devices
         self.canvas_3d.monitors = monitors
         self.canvas_3d.cycle_offset = 0
-        self.canvas_3d.snap_side_view()
+        self.canvas_3d.snap_reset_view()
 
         self.update_cycles_completed_text()
         self.update_module_signal_rows()

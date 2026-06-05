@@ -64,11 +64,16 @@ class Canvas3D(wxcanvas.GLCanvas):
                 wxcanvas.WX_GL_DOUBLEBUFFER,
                 wxcanvas.WX_GL_DEPTH_SIZE,
                 16,
+                wxcanvas.WX_GL_SAMPLE_BUFFERS,
+                1,
+                wxcanvas.WX_GL_SAMPLES,
+                4,
                 0,
             ],
         )
         initialise_glut_once()
         self.init = False
+        self.multisample_enabled = True
         self.context = wxcanvas.GLContext(self)
         self.devices = devices
         self.monitors = monitors
@@ -83,7 +88,7 @@ class Canvas3D(wxcanvas.GLCanvas):
             "canvas_grid": (0.18, 0.2, 0.24),
             "canvas_trace": (0.42, 0.68, 1.0),
         }
-        self.z_planes = {"INPUTS": 0.0, "NETS": -150.0, "OUTPUTS": -300.0}
+        self.z_planes = {"INPUTS": 0.0, "INTERNALS": -150.0, "OUTPUTS": -300.0}
         self.focal_x = 0.0
         self.focal_y = 0.0
         self.focal_z = -150.0
@@ -106,7 +111,7 @@ class Canvas3D(wxcanvas.GLCanvas):
         """
         if event.IsShown() and getattr(self, "_needs_framing_on_show", False):
             self._needs_framing_on_show = False
-            wx.CallAfter(self.snap_side_view)
+            wx.CallAfter(self.snap_reset_view)
         event.Skip()
 
     def reset_view(self):
@@ -159,6 +164,10 @@ class Canvas3D(wxcanvas.GLCanvas):
         GL.glColorMaterial(GL.GL_FRONT_AND_BACK, GL.GL_AMBIENT_AND_DIFFUSE)
         GL.glEnable(GL.GL_DEPTH_TEST)
         GL.glDepthFunc(GL.GL_LEQUAL)
+        if self.multisample_enabled:
+            GL.glEnable(GL.GL_MULTISAMPLE)
+        else:
+            GL.glDisable(GL.GL_MULTISAMPLE)
         GL.glShadeModel(GL.GL_SMOOTH)
         GL.glEnable(GL.GL_LIGHTING)
         GL.glEnable(GL.GL_LIGHT0)
@@ -226,30 +235,44 @@ class Canvas3D(wxcanvas.GLCanvas):
         hit_y = near_pt[1] + dy * t
         return (hit_x, hit_y)
 
-    def categorise_signals(self):
-        """Group active monitors into input, net and output planes.
+    def set_multisample(self, enabled):
+        """Enable or disable multisample antialiasing for the OpenGL context."""
+        self.multisample_enabled = enabled
+        self.SetCurrent(self.context)
+        if enabled:
+            GL.glEnable(GL.GL_MULTISAMPLE)
+        else:
+            GL.glDisable(GL.GL_MULTISAMPLE)
+        self.Refresh()
 
-        Input signals include switches, clocks and compatible signal
-        generators. Nets and outputs are classified by their names.
+    def categorise_signals(self):
+        """Group active monitors into input, internal, and output planes.
+
+        Nested signals are grouped into internals. Remaining top-level
+        signals are split into inputs (switches/clocks) and outputs.
         """
-        inputs, nets, outputs = ([], [], [])
+        inputs, internals, outputs = ([], [], [])
         for name, monitor in self.monitors.monitors_dictionary.items():
             device = self.devices.get_device(monitor.device_id)
             if device is None:
                 continue
+            if "->" in name:
+                internals.append((name, monitor))
+                continue
+
             is_input = device.device_kind in [self.devices.SWITCH, self.devices.CLOCK]
             if (
                 hasattr(self.devices, "SIGGEN")
                 and device.device_kind == self.devices.SIGGEN
             ):
                 is_input = True
+
             if is_input:
                 inputs.append((name, monitor))
-            elif "->" in name or "." in name:
-                nets.append((name, monitor))
             else:
                 outputs.append((name, monitor))
-        return {"INPUTS": inputs, "NETS": nets, "OUTPUTS": outputs}
+
+        return {"INPUTS": inputs, "INTERNALS": internals, "OUTPUTS": outputs}
 
     def render(self):
         """Render the complete 3D scene for the current monitor traces.
@@ -283,6 +306,7 @@ class Canvas3D(wxcanvas.GLCanvas):
         )
         max_x = start_x + max_trace_len * step_x
         global_max_y = 0
+        GL.glLineWidth(2.0)
         for group_name, signals in signal_groups.items():
             if not signals:
                 continue
@@ -310,30 +334,31 @@ class Canvas3D(wxcanvas.GLCanvas):
         if self.cycle_inspector_enabled and max_trace_len > 0:
             inspector_x = start_x + self.cycle_inspector_index * step_x + step_x / 2.0
             self.draw_cycle_inspector_slice(inspector_x, global_max_y)
+        GL.glLineWidth(1.0)
         GL.glFlush()
         self.SwapBuffers()
 
     def draw_z_plane(self, name, z_depth, start_x, max_x, max_y):
-        """Draw a semi-transparent grid floor at the given depth plane.
-
-        This visually groups signals for inputs, nets and outputs.
-        """
+        """Draw a semi-transparent grid floor at the given depth plane."""
         if self.trace_bg_mode == 0:
-            return  # Mode 0: Transparent (render nothing)
+            return
 
         GL.glDisable(GL.GL_LIGHTING)
-        GL.glDisable(GL.GL_CULL_FACE)  # Ensure backface culling is explicitly off
+        GL.glDisable(GL.GL_CULL_FACE)
         GL.glEnable(GL.GL_BLEND)
         GL.glBlendFunc(GL.GL_SRC_ALPHA, GL.GL_ONE_MINUS_SRC_ALPHA)
 
-        grid_colour = self.theme.get("canvas_grid", (0.5, 0.5, 0.5))
+        # Pull explicit colors from the theme dictionary
+        plane_bg_colour = self.theme.get("canvas_grid", (0.5, 0.5, 0.5))
+        line_colour = self.theme.get("canvas_axis", (0.5, 0.5, 0.5))
         pad = 20.0
 
-        # --- MODE 2: Normal (Full Plane Background) ---
         if self.trace_bg_mode == 2:
-            GL.glColor4f(grid_colour[0], grid_colour[1], grid_colour[2], 0.15)
+            # Bump alpha to 0.35 so the plane stands out slightly from the canvas
+            GL.glColor4f(
+                plane_bg_colour[0], plane_bg_colour[1], plane_bg_colour[2], 0.35
+            )
 
-            # Vectorised Quad Array (4 vertices)
             quad_verts = np.array(
                 [
                     [start_x - pad, -pad, z_depth],
@@ -349,11 +374,10 @@ class Canvas3D(wxcanvas.GLCanvas):
             GL.glDrawArrays(GL.GL_QUADS, 0, 4)
             GL.glDisableClientState(GL.GL_VERTEX_ARRAY)
 
-        # --- MODES 1 & 2: Grid Lines ---
         if self.trace_bg_mode in (1, 2):
-            GL.glColor4f(grid_colour[0], grid_colour[1], grid_colour[2], 0.3)
+            # Use the high-contrast axis colour for the grid lines
+            GL.glColor4f(line_colour[0], line_colour[1], line_colour[2], 0.25)
 
-            # 1. Vectorised Horizontal Lines
             y_vals = np.arange(0, max_y + pad + 1, 30, dtype=np.float32)
             h_lines = np.zeros((len(y_vals), 2, 3), dtype=np.float32)
             h_lines[:, 0, 0] = start_x - pad
@@ -361,7 +385,6 @@ class Canvas3D(wxcanvas.GLCanvas):
             h_lines[:, :, 1] = y_vals[:, np.newaxis]
             h_lines[:, :, 2] = z_depth
 
-            # 2. Vectorised Vertical Lines
             x_vals = np.arange(start_x, max_x + pad + 1, 100, dtype=np.float32)
             v_lines = np.zeros((len(x_vals), 2, 3), dtype=np.float32)
             v_lines[:, :, 0] = x_vals[:, np.newaxis]
@@ -369,7 +392,6 @@ class Canvas3D(wxcanvas.GLCanvas):
             v_lines[:, 1, 1] = max_y + pad
             v_lines[:, :, 2] = z_depth
 
-            # Combine all lines and draw in a single OpenGL batch
             all_lines = np.ascontiguousarray(
                 np.concatenate([h_lines.reshape(-1, 3), v_lines.reshape(-1, 3)], axis=0)
             )
@@ -383,29 +405,36 @@ class Canvas3D(wxcanvas.GLCanvas):
         GL.glEnable(GL.GL_LIGHTING)
 
     def draw_axes(self, group_name, z_depth, start_x, max_x, trace_length, step_x):
-        """Draw the plane label, axis line and cycle tick marks for a
-        depth plane.
-
-        It also renders cycle numbers at regular intervals.
-        """
+        """Draw the plane label, axis line and cycle tick marks."""
         GL.glDisable(GL.GL_LIGHTING)
+
         text_colour = self.theme.get("canvas_text", (1, 1, 1))
+        muted_colour = self.theme.get("canvas_muted", (0.5, 0.5, 0.5))
+        axis_colour = self.theme.get("canvas_axis", (0.5, 0.5, 0.5))
+
         self.render_text(f"[{group_name}]", start_x - 80, -40, z_depth, text_colour)
-        GL.glColor3f(text_colour[0] * 0.5, text_colour[1] * 0.5, text_colour[2] * 0.5)
+
+        GL.glColor3f(*axis_colour)
         GL.glBegin(GL.GL_LINES)
         GL.glVertex3f(start_x, -10, z_depth)
         GL.glVertex3f(max_x, -10, z_depth)
         GL.glEnd()
+
         for cycle in range(0, trace_length + 1):
             if cycle % 5 == 0:
                 x_pos = start_x + cycle * step_x
                 self.render_text(
-                    str(cycle + self.cycle_offset), x_pos - 2, -25, z_depth, text_colour
+                    str(cycle + self.cycle_offset),
+                    x_pos - 2,
+                    -25,
+                    z_depth,
+                    muted_colour,
                 )
                 GL.glBegin(GL.GL_LINES)
                 GL.glVertex3f(x_pos, -10, z_depth)
                 GL.glVertex3f(x_pos, -15, z_depth)
                 GL.glEnd()
+
         GL.glEnable(GL.GL_LIGHTING)
 
     def draw_3d_ribbon(self, trace, start_x, base_y, z_depth, step_x, amplitude_y):
@@ -590,20 +619,21 @@ class Canvas3D(wxcanvas.GLCanvas):
         GL.glDisableClientState(GL.GL_VERTEX_ARRAY)
 
     def draw_cycle_inspector_slice(self, inspector_x, max_y):
-        """Draw a translucent vertical slice through the entire 3D stack
-        at the selected cycle index.
-
-        This highlights the current cycle across all signal planes.
-        """
+        """Draw a translucent vertical slice through the 3D stack."""
         GL.glDisable(GL.GL_LIGHTING)
         GL.glEnable(GL.GL_BLEND)
         GL.glBlendFunc(GL.GL_SRC_ALPHA, GL.GL_ONE_MINUS_SRC_ALPHA)
-        GL.glColor4f(1.0, 0.8, 0.2, 0.3)
+
+        # Pull the accent color from the theme instead of using hardcoded yellow
+        slice_colour = self.theme.get("canvas_trace", (0.2, 0.6, 1.0))
+        GL.glColor4f(slice_colour[0], slice_colour[1], slice_colour[2], 0.25)
+
         z_front = 50
         z_back = self.z_planes["OUTPUTS"] - 50
         y_bottom = -30
         y_top = max_y + 30
         thickness = 1.0
+
         GL.glBegin(GL.GL_QUADS)
         GL.glVertex3f(inspector_x - thickness, y_bottom, z_front)
         GL.glVertex3f(inspector_x - thickness, y_top, z_front)
@@ -618,6 +648,7 @@ class Canvas3D(wxcanvas.GLCanvas):
         GL.glVertex3f(inspector_x + thickness, y_top, z_back)
         GL.glVertex3f(inspector_x - thickness, y_top, z_back)
         GL.glEnd()
+
         GL.glDisable(GL.GL_BLEND)
         GL.glEnable(GL.GL_LIGHTING)
 
@@ -642,7 +673,7 @@ class Canvas3D(wxcanvas.GLCanvas):
                 GLUT.glutBitmapCharacter(font, ord(char))
         GL.glEnable(GL.GL_LIGHTING)
 
-    def snap_side_view(self):
+    def snap_reset_view(self):
         """Set the camera to an isometric side view and recalculate
         framing.
 
@@ -663,50 +694,78 @@ class Canvas3D(wxcanvas.GLCanvas):
         self.camera_yaw = 0.0
         self._calculate_focal_and_zoom()
 
-    def snap_top_view(self):
-        """Set the camera to a near-vertical top view and recalculate
-        framing.
-
-        This reveals the depth separation along the z-axis.
-        """
-        self.SetCurrent(self.context)
-        self.camera_pitch = 89.0
-        self.camera_yaw = 0.0
-        self._calculate_focal_and_zoom()
-
     def _calculate_focal_and_zoom(self):
         """Recalculate the focal point and camera distance so all visible
-        signals fit within the view.
-
-        It uses a bounding sphere and the canvas aspect ratio to choose the
-        zoom level.
+        signals fit tightly within the view.
         """
         size = self.GetClientSize()
         if size.width < 50 or size.height < 50:
             self._needs_framing_on_show = True
             return
-        num_signals = len(self.monitors.monitors_dictionary)
+
+        # Figure out exactly which planes have signals and how tall they are
+        signal_groups = self.categorise_signals()
+
+        # 1. DYNAMIC Z-CENTER: Find the midpoint of only the active planes
+        active_z_depths = [
+            self.z_planes[group] for group, signals in signal_groups.items() if signals
+        ]
+
+        if active_z_depths:
+            self.focal_z = (min(active_z_depths) + max(active_z_depths)) / 2.0
+        else:
+            self.focal_z = -150.0
+
+        # 2. TRUE Y-CENTER: Height is based on the tallest single plane, not total signals
+        max_signals_in_a_plane = max(
+            [len(sigs) for sigs in signal_groups.values()] + [0]
+        )
+
+        step_x = 20.0
+        spacing_y = 30.0
+        amplitude_y = 15.0
+        start_x = -150.0
+
+        # The lowest drawn item is the axis label at Y = -40
+        min_y = -40.0
+        max_y = max(0, max_signals_in_a_plane - 1) * spacing_y + amplitude_y
+        total_height = max_y - min_y
+        self.focal_y = min_y + (total_height / 2.0)
+
+        # 3. TRUE X-CENTER: Account for the labels drawn to the left of the origin
         max_len = max(
             [len(m.trace) for m in self.monitors.monitors_dictionary.values()] + [10]
         )
-        step_x = 20.0
-        spacing_y = 40.0
-        amplitude_y = 20.0
-        total_width = max_len * step_x
-        total_height = max(0, num_signals - 1) * spacing_y + amplitude_y
-        self.focal_x = 0.0
-        self.focal_y = total_height / 2.0
-        self.focal_z = -150.0
+        min_x = start_x - 80.0
+        max_x = start_x + (max_len * step_x)
+        total_width = max_x - min_x
+        self.focal_x = min_x + (total_width / 2.0)
+
+        # 4. TIGHT ZOOM: Calculate exact distance required based on the new bounds
         aspect = size.width / size.height
-        dx_max = total_width
-        dy_max = total_height / 2.0
-        dz_max = 150.0
-        radius = np.sqrt(dx_max**2 + dy_max**2 + dz_max**2)
+        pad_x = 80.0
+        pad_y = 80.0
+
         half_fov_y_rad = np.radians(22.5)
         half_fov_x_rad = np.arctan(np.tan(half_fov_y_rad) * aspect)
-        dist_y = radius / np.sin(half_fov_y_rad)
-        dist_x = radius / np.sin(half_fov_x_rad)
-        self.camera_distance = max(dist_x, dist_y) * 1.1
+
+        dist_y = ((total_height / 2.0) + pad_y) / np.tan(half_fov_y_rad)
+        dist_x = ((total_width / 2.0) + pad_x) / np.tan(half_fov_x_rad)
+
+        pitch_rad = np.radians(abs(self.camera_pitch))
+        yaw_rad = np.radians(abs(self.camera_yaw))
+
+        proj_dist_x = dist_x * (1.0 + np.sin(yaw_rad) * 0.5)
+        proj_dist_y = dist_y * (1.0 + np.sin(pitch_rad) * 0.5)
+
+        # Pull camera back slightly if there is a massive depth gap
+        # (prevents front plane clipping in perspective)
+        z_depth_spread = 0
+        if active_z_depths:
+            z_depth_spread = (max(active_z_depths) - min(active_z_depths)) / 2.0
+
+        self.camera_distance = max(proj_dist_x, proj_dist_y, 250.0) + z_depth_spread
+
         self.init = False
         self.Refresh()
 
@@ -718,10 +777,8 @@ class Canvas3D(wxcanvas.GLCanvas):
         keycode = event.GetKeyCode()
         if keycode == ord("1") or keycode == ord("F"):
             self.snap_front_view()
-        elif keycode == ord("2") or keycode == ord("S"):
-            self.snap_side_view()
-        elif keycode == ord("3") or keycode == ord("T"):
-            self.snap_top_view()
+        elif keycode == ord("2") or keycode == ord("R"):
+            self.snap_reset_view()
         elif keycode == ord("B"):
             self.trace_bg_mode = (self.trace_bg_mode + 1) % 3
             self.Refresh()
