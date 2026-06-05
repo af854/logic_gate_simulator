@@ -9,22 +9,22 @@ MyGLCanvas - handles all canvas drawing operations.
 Gui - configures the main window and all the widgets.
 """
 
-import wx
-import wx.lib.buttons as wxbuttons
-import wx.glcanvas as wxcanvas
-from OpenGL import GL, GLUT
-import csv
 import contextlib
+import csv
 import io
 import os
 
-from names import Names
+import wx
+import wx.glcanvas as wxcanvas
+import wx.lib.buttons as wxbuttons
 from devices import Devices
-from network import Network
+from gui_3D import Canvas3D
 from monitors import Monitors
-from scanner import Scanner
+from names import Names
+from network import Network
+from OpenGL import GL, GLUT
 from parse import Parser
-
+from scanner import Scanner
 
 # GLUT is initialised once to avoid repeated initialisation warnings on macOS.
 GLUT_INITIALISED = False
@@ -136,6 +136,7 @@ ID_SHOW_AVAILABLE_SIGNALS = wx.NewIdRef()
 ID_SHOW_SIMULATION = wx.NewIdRef()
 ID_SHOW_SWITCHES = wx.NewIdRef()
 ID_SHOW_CONSOLE = wx.NewIdRef()
+ID_TOGGLE_3D = wx.NewIdRef()
 
 
 MAX_RUN_CYCLES = 1000
@@ -1178,7 +1179,6 @@ class Gui(wx.Frame):
         theme, and disables file-dependent controls when no circuit is loaded.
 
         """
-        # Create the main window and set its starting size
         super().__init__(parent=None, title=title, size=(1200, 750))
         base_font = self.GetFont()
         base_font.SetPointSize(max(1, base_font.GetPointSize() - 1))
@@ -1190,17 +1190,11 @@ class Gui(wx.Frame):
         self.devices = devices
         self.network = network
         self.monitors = monitors
-
-        # From the parser - so GUI knows the driving
-        # signals of nets to make the appropriate monitors.
         self.net_driver_dict = net_driver_dict
         self.theme_name = self.get_system_theme_name()
         self.theme = THEMES[self.theme_name]
 
-        # Number of cycles currently shown on the trace display
         self.cycles_completed = 0
-
-        # Total cycles since the last reset
         self.total_cycles_completed = 0
         self.simulation_history = []
         self.redo_history = []
@@ -1238,6 +1232,9 @@ class Gui(wx.Frame):
         self.cycle_inspector_menu_item = view_menu.AppendCheckItem(
             ID_TOGGLE_CYCLE_INSPECTOR, "Show cycle inspector"
         )
+        self.view_3d_menu_item = view_menu.AppendCheckItem(
+            ID_TOGGLE_3D, "Enable 3D Data Flow View\tctrl+D"
+        )
         view_menu.AppendSeparator()
 
         if self.theme_name == "dark":
@@ -1272,9 +1269,13 @@ class Gui(wx.Frame):
         self.CreateStatusBar()
         self.SetStatusText("Ready")
 
-        # Canvas for drawing signals
-        self.canvas = MyGLCanvas(self, devices, monitors)
-        self.canvas.SetMinSize((500, 420))
+        # Canvases for drawing signals
+        self.canvas_2d = MyGLCanvas(self, devices, monitors)
+        self.canvas_2d.SetMinSize((500, 420))
+
+        self.canvas_3d = Canvas3D(self, devices, monitors)
+        self.canvas_3d.SetMinSize((500, 420))
+        self.canvas_3d.Hide()  # Hidden by default
 
         # Configure the widgets
         self.text = wx.StaticText(self, wx.ID_ANY, "Cycles to run")
@@ -1375,7 +1376,6 @@ class Gui(wx.Frame):
         self.switch_rows.SetSizer(self.switch_rows_sizer)
         self.switch_state_buttons = {}
 
-        # This is the visible monitor picker
         self.module_signal_rows = wx.ScrolledWindow(
             self, wx.ID_ANY, style=wx.HSCROLL | wx.VSCROLL | wx.BORDER_SIMPLE
         )
@@ -1384,8 +1384,6 @@ class Gui(wx.Frame):
         self.module_signal_rows_sizer = wx.BoxSizer(wx.VERTICAL)
         self.module_signal_rows.SetSizer(self.module_signal_rows_sizer)
 
-        # These dictionaries connect buttons and panes back to signal names or
-        # module paths
         self.module_signal_button_names = {}
         self.module_signal_action_buttons = {}
         self.module_signal_pane_paths = {}
@@ -1401,12 +1399,9 @@ class Gui(wx.Frame):
         self.monitor_rows_sizer = wx.BoxSizer(wx.VERTICAL)
         self.monitor_rows.SetSizer(self.monitor_rows_sizer)
         self.monitor_button_keys = {}
-
-        # The separate active monitors panel is hidden because the available
-        # signal list now shows add or remove next to each signal
         self.monitor_rows.Hide()
 
-        # Bind events to widgets
+        # Bind events
         self.Bind(wx.EVT_MENU, self.on_menu)
         self.Bind(wx.EVT_MENU, self.on_help, id=ID_HELP)
         self.Bind(wx.EVT_MENU, self.on_keyboard_shortcuts_help, id=ID_HELP_SHORTCUTS)
@@ -1441,6 +1436,7 @@ class Gui(wx.Frame):
         self.Bind(
             wx.EVT_MENU, self.on_toggle_cycle_inspector, id=ID_TOGGLE_CYCLE_INSPECTOR
         )
+        self.Bind(wx.EVT_MENU, self.on_toggle_3d, id=ID_TOGGLE_3D)
         self.Bind(wx.EVT_MENU, self.on_export_image, id=ID_EXPORT_IMAGE)
         self.Bind(wx.EVT_MENU, self.on_export_csv, id=ID_EXPORT_CSV)
         self.Bind(wx.EVT_MENU, self.on_zoom_in, id=ID_ZOOM_IN)
@@ -1452,66 +1448,35 @@ class Gui(wx.Frame):
         self.Bind(wx.EVT_MENU, self.on_show_section, id=ID_SHOW_SWITCHES)
         self.Bind(wx.EVT_MENU, self.on_show_section, id=ID_SHOW_CONSOLE)
 
-        # Keyboard shortcuts call the same handlers as the buttons
+        # Keyboard shortcuts
         accelerators = wx.AcceleratorTable(
             [
-                (wx.ACCEL_NORMAL, wx.WXK_SPACE, ID_RUN),  # Space: run cycles
-                (
-                    wx.ACCEL_NORMAL,
-                    wx.WXK_RIGHT,
-                    ID_RUN_ONE,
-                ),  # Right arrow: run one cycle
-                (
-                    wx.ACCEL_CTRL,
-                    wx.WXK_SPACE,
-                    ID_TOGGLE_LIVE_TRACE,
-                ),  # Ctrl+Space: play/pause live tracing
-                (wx.ACCEL_CTRL, ord("Z"), ID_UNDO_CYCLE),  # Ctrl+Z: undo one cycle
-                (wx.ACCEL_CTRL, ord("Y"), ID_REDO_CYCLE),  # Ctrl+Y: redo one cycle
-                (wx.ACCEL_CTRL, ord("O"), ID_OPEN_FILE),  # Ctrl+O: open file
-                (wx.ACCEL_CTRL, ord("="), ID_ZOOM_IN),  # Ctrl+=: zoom in
-                (wx.ACCEL_CTRL, ord("-"), ID_ZOOM_OUT),  # Ctrl+-: zoom out
-                (wx.ACCEL_CTRL, ord("0"), ID_RESET_VIEW),  # Ctrl+0: reset view
-                (
-                    wx.ACCEL_CTRL,
-                    ord("I"),
-                    ID_TOGGLE_CYCLE_INSPECTOR,
-                ),  # Ctrl+I: show/hide cycle inspector
-                (
-                    wx.ACCEL_CTRL | wx.ACCEL_SHIFT,
-                    ord("P"),
-                    ID_EXPORT_IMAGE,
-                ),  # Ctrl+Shift+P: export PNG
-                (
-                    wx.ACCEL_CTRL | wx.ACCEL_SHIFT,
-                    ord("E"),
-                    ID_EXPORT_CSV,
-                ),  # Ctrl+Shift+E: export CSV
-                (
-                    wx.ACCEL_CTRL | wx.ACCEL_SHIFT,
-                    ord("T"),
-                    ID_TOGGLE_THEME,
-                ),  # Ctrl+Shift+T: light/dark mode
-                (
-                    wx.ACCEL_CTRL,
-                    ord("1"),
-                    ID_SHOW_AVAILABLE_SIGNALS,
-                ),  # Ctrl+1: show available signals
-                (
-                    wx.ACCEL_CTRL,
-                    ord("2"),
-                    ID_SHOW_SIMULATION,
-                ),  # Ctrl+2: show simulation
-                (wx.ACCEL_CTRL, ord("3"), ID_SHOW_SWITCHES),  # Ctrl+3: show switches
-                (wx.ACCEL_CTRL, ord("4"), ID_SHOW_CONSOLE),  # Ctrl+4: show console
-                (wx.ACCEL_NORMAL, wx.WXK_F1, ID_HELP),  # F1: help
-                (wx.ACCEL_CTRL, ord("Q"), wx.ID_EXIT),  # Ctrl+Q: exit
+                (wx.ACCEL_NORMAL, wx.WXK_SPACE, ID_RUN),
+                (wx.ACCEL_NORMAL, wx.WXK_RIGHT, ID_RUN_ONE),
+                (wx.ACCEL_CTRL, wx.WXK_SPACE, ID_TOGGLE_LIVE_TRACE),
+                (wx.ACCEL_CTRL, ord("Z"), ID_UNDO_CYCLE),
+                (wx.ACCEL_CTRL, ord("Y"), ID_REDO_CYCLE),
+                (wx.ACCEL_CTRL, ord("O"), ID_OPEN_FILE),
+                (wx.ACCEL_CTRL, ord("="), ID_ZOOM_IN),
+                (wx.ACCEL_CTRL, ord("-"), ID_ZOOM_OUT),
+                (wx.ACCEL_CTRL, ord("0"), ID_RESET_VIEW),
+                (wx.ACCEL_CTRL, ord("I"), ID_TOGGLE_CYCLE_INSPECTOR),
+                (wx.ACCEL_CTRL, ord("D"), ID_TOGGLE_3D),  # Shortcut for 3D
+                (wx.ACCEL_CTRL | wx.ACCEL_SHIFT, ord("P"), ID_EXPORT_IMAGE),
+                (wx.ACCEL_CTRL | wx.ACCEL_SHIFT, ord("E"), ID_EXPORT_CSV),
+                (wx.ACCEL_CTRL | wx.ACCEL_SHIFT, ord("T"), ID_TOGGLE_THEME),
+                (wx.ACCEL_CTRL, ord("1"), ID_SHOW_AVAILABLE_SIGNALS),
+                (wx.ACCEL_CTRL, ord("2"), ID_SHOW_SIMULATION),
+                (wx.ACCEL_CTRL, ord("3"), ID_SHOW_SWITCHES),
+                (wx.ACCEL_CTRL, ord("4"), ID_SHOW_CONSOLE),
+                (wx.ACCEL_NORMAL, wx.WXK_F1, ID_HELP),
+                (wx.ACCEL_CTRL, ord("Q"), wx.ID_EXIT),
                 (wx.ACCEL_NORMAL, wx.WXK_DELETE, ID_CLEAR_STATUS),
             ]
-        )  # Delete: clear console
+        )
         self.SetAcceleratorTable(accelerators)
 
-        # Configure sizers for layout
+        # Configure sizers
         root_sizer = wx.BoxSizer(wx.VERTICAL)
         main_sizer = wx.BoxSizer(wx.HORIZONTAL)
         canvas_sizer = wx.BoxSizer(wx.VERTICAL)
@@ -1579,7 +1544,10 @@ class Gui(wx.Frame):
         self.cycle_inspector_slider.SetMinSize((120, -1))
         inspector_sizer.Add(self.cycle_inspector_slider, 1, wx.EXPAND)
         self.cycle_inspector_panel.SetSizer(inspector_sizer)
-        canvas_sizer.Add(self.canvas, 1, wx.EXPAND)
+
+        # Add both canvases to the layout
+        canvas_sizer.Add(self.canvas_2d, 1, wx.EXPAND)
+        canvas_sizer.Add(self.canvas_3d, 1, wx.EXPAND)
         canvas_sizer.Add(
             self.cycle_inspector_panel, 0, wx.EXPAND | wx.LEFT | wx.RIGHT | wx.BOTTOM, 5
         )
@@ -1615,8 +1583,6 @@ class Gui(wx.Frame):
         minimum_width = MIN_FRAME_WIDTH
         minimum_height = MIN_FRAME_HEIGHT
 
-        # If the starting size is smaller than the fixed minimum, make the
-        # window start at the minimum size
         current_size = self.GetSize()
         if current_size.width < minimum_width or current_size.height < minimum_height:
             self.SetSize((minimum_width, minimum_height))
@@ -1780,7 +1746,7 @@ class Gui(wx.Frame):
             "monitor_traces": monitor_traces,
             "cycles_completed": self.cycles_completed,
             "total_cycles_completed": self.total_cycles_completed,
-            "cycle_offset": self.canvas.cycle_offset,
+            "cycle_offset": self.active_canvas.cycle_offset,
         }
 
     def restore_simulation_snapshot(self, simulation_snapshot):
@@ -1809,7 +1775,8 @@ class Gui(wx.Frame):
 
         self.cycles_completed = simulation_snapshot["cycles_completed"]
         self.total_cycles_completed = simulation_snapshot["total_cycles_completed"]
-        self.canvas.cycle_offset = simulation_snapshot["cycle_offset"]
+        self.canvas_2d.cycle_offset = simulation_snapshot["cycle_offset"]
+        self.canvas_3d.cycle_offset = simulation_snapshot["cycle_offset"]
         self.update_cycles_completed_text()
         self.update_cycle_inspector_range()
 
@@ -1847,11 +1814,12 @@ class Gui(wx.Frame):
             self.cycle_inspector_slider.Enable(False)
             self.cycle_inspector_entry.SetValue("-")
             self.cycle_inspector_entry.Enable(False)
-            self.canvas.cycle_inspector_index = 0
+            self.canvas_2d.cycle_inspector_index = 0
+            self.canvas_3d.cycle_inspector_index = 0
             return
 
         max_index = max_trace_length - 1
-        current_index = self.canvas.cycle_inspector_index
+        current_index = self.active_canvas.cycle_inspector_index
         if current_index > max_index:
             current_index = max_index
 
@@ -1859,16 +1827,20 @@ class Gui(wx.Frame):
             self.cycle_inspector_slider.SetRange(0, 1)
         else:
             self.cycle_inspector_slider.SetRange(1, max_trace_length)
+
         self.cycle_inspector_slider.SetValue(current_index + 1)
         self.cycle_inspector_slider.Enable(True)
         self.cycle_inspector_entry.Enable(True)
-        self.canvas.cycle_inspector_index = current_index
+        self.canvas_2d.cycle_inspector_index = current_index
+        self.canvas_3d.cycle_inspector_index = current_index
         self.update_cycle_inspector_label()
 
     def update_cycle_inspector_label(self):
         """Show the real cycle number selected by the inspector entry."""
         selected_cycle = (
-            self.canvas.cycle_offset + self.canvas.cycle_inspector_index + 1
+            self.active_canvas.cycle_offset
+            + self.active_canvas.cycle_inspector_index
+            + 1
         )
         if self.cycle_inspector_entry.GetValue() != str(selected_cycle):
             self.cycle_inspector_entry.SetValue(str(selected_cycle))
@@ -1887,14 +1859,14 @@ class Gui(wx.Frame):
         if max_trace_length <= 0:
             return 0
 
-        minimum_cycle = self.canvas.cycle_offset + 1
-        maximum_cycle = self.canvas.cycle_offset + max_trace_length
+        minimum_cycle = self.active_canvas.cycle_offset + 1
+        maximum_cycle = self.active_canvas.cycle_offset + max_trace_length
         if cycle_number < minimum_cycle:
             cycle_number = minimum_cycle
         if cycle_number > maximum_cycle:
             cycle_number = maximum_cycle
 
-        return cycle_number - self.canvas.cycle_offset - 1
+        return cycle_number - self.active_canvas.cycle_offset - 1
 
     def set_cycle_inspector_index(self, cycle_index):
         """Select a trace index for inspection and update the controls."""
@@ -1908,7 +1880,8 @@ class Gui(wx.Frame):
         if cycle_index >= max_trace_length:
             cycle_index = max_trace_length - 1
 
-        self.canvas.cycle_inspector_index = cycle_index
+        self.canvas_2d.cycle_inspector_index = cycle_index
+        self.canvas_3d.cycle_inspector_index = cycle_index
         self.cycle_inspector_slider.SetValue(cycle_index + 1)
         self.update_cycle_inspector_label()
 
@@ -2027,7 +2000,6 @@ class Gui(wx.Frame):
 
         cycles = self.spin.GetValue()
 
-        # Check the network before running it
         if not self.network.check_network():
             self.show_status("Error: network is incomplete.")
             return
@@ -2035,7 +2007,7 @@ class Gui(wx.Frame):
         if self.run_cycles(cycles):
             self.show_status(f"Ran simulation for {cycles} cycles.")
             self.SetStatusText(f"Ran {cycles} cycles")
-            self.canvas.render()
+            self.active_canvas.render()
 
     def on_run_one_cycle(self, event):
         """Run exactly one simulation cycle from the current state."""
@@ -2051,7 +2023,7 @@ class Gui(wx.Frame):
         if self.run_cycles(1):
             self.show_status("Ran simulation for 1 cycle.")
             self.SetStatusText("Ran 1 cycle")
-            self.canvas.render()
+            self.active_canvas.render()
 
     def on_toggle_live_trace(self, event):
         """Start, pause, or resume live tracing depending on current state."""
@@ -2210,32 +2182,44 @@ class Gui(wx.Frame):
             f"Live tracing: {self.live_trace_cycles_completed}/"
             f"{self.live_trace_target_cycles} cycles"
         )
-        self.canvas.follow_latest_cycle()
-        self.canvas.render()
+        if hasattr(self.active_canvas, "follow_latest_cycle"):
+            self.active_canvas.follow_latest_cycle()
+        self.active_canvas.render()
 
         if self.live_trace_cycles_completed >= self.live_trace_target_cycles:
             completed_cycles = self.live_trace_cycles_completed
             self.stop_live_trace()
             self.live_trace_paused = False
             self.show_status(f"Completed live tracing for {completed_cycles} cycles.")
-            self.SetStatusText(
-                f"Completed live tracing for {completed_cycles} cycles."
-            )
+            self.SetStatusText(f"Completed live tracing for {completed_cycles} cycles.")
 
     def on_undo_cycle(self, event):
         """Restore the simulator state from before the most recent cycle."""
-        self.stop_live_trace()
-        if not self.simulation_history:
-            self.show_status("Error: no simulation cycle to undo.")
+        if not self.network.check_network():
+            self.stop_live_trace()
+            self.show_status("Error: network is incomplete.")
             return
 
-        self.redo_history.append(self.get_simulation_snapshot())
-        simulation_snapshot = self.simulation_history.pop()
-        self.restore_simulation_snapshot(simulation_snapshot)
-        self.refresh_switch_rows()
-        self.canvas.render()
-        self.update_history_buttons()
-        self.show_status("Undid 1 cycle.")
+        if not self.run_cycles(1):
+            self.stop_live_trace()
+            self.SetStatusText("Live tracing stopped")
+            return
+
+        self.live_trace_cycles_completed += 1
+        self.SetStatusText(
+            f"Live tracing: {self.live_trace_cycles_completed}/"
+            f"{self.live_trace_target_cycles} cycles"
+        )
+        if hasattr(self.active_canvas, "follow_latest_cycle"):
+            self.active_canvas.follow_latest_cycle()
+        self.active_canvas.render()
+
+        if self.live_trace_cycles_completed >= self.live_trace_target_cycles:
+            completed_cycles = self.live_trace_cycles_completed
+            self.stop_live_trace()
+            self.live_trace_paused = False
+            self.show_status(f"Completed live tracing for {completed_cycles} cycles.")
+            self.SetStatusText(f"Completed live tracing for {completed_cycles} cycles.")
 
     def on_redo_cycle(self, event):
         """Replay the most recently undone cycle snapshot."""
@@ -2248,9 +2232,33 @@ class Gui(wx.Frame):
         simulation_snapshot = self.redo_history.pop()
         self.restore_simulation_snapshot(simulation_snapshot)
         self.refresh_switch_rows()
-        self.canvas.render()
+        self.active_canvas.render()
         self.update_history_buttons()
         self.show_status("Redid 1 cycle.")
+
+    @property
+    def active_canvas(self):
+        """Efficiently return the currently visible canvas."""
+        if hasattr(self, "view_3d_menu_item") and self.view_3d_menu_item.IsChecked():
+            return self.canvas_3d
+        return self.canvas_2d
+
+    def on_toggle_3d(self, event):
+        """Switch between 2D and 3D canvas modes seamlessly."""
+        is_3d = self.view_3d_menu_item.IsChecked()
+
+        if is_3d:
+            self.canvas_2d.Hide()
+            self.canvas_3d.Show()
+            self.show_status("Switched to 3D Data Flow view")
+        else:
+            self.canvas_3d.Hide()
+            self.canvas_2d.Show()
+            self.show_status("Switched to 2D trace view")
+
+        self.Layout()
+        self.Refresh()
+        self.active_canvas.render()
 
     def on_reset_button(self, event):
         """Cold-start the circuit and clear all recorded trace history."""
@@ -2259,18 +2267,23 @@ class Gui(wx.Frame):
             self.show_no_loaded_circuit_error()
             return
 
-        # Start again, but do not run any cycles yet
         self.devices.cold_startup()
         self.monitors.reset_monitors()
         self.cycles_completed = 0
         self.total_cycles_completed = 0
         self.simulation_history = []
         self.redo_history = []
-        self.canvas.cycle_offset = 0
+        self.canvas_2d.cycle_offset = 0
+        self.canvas_3d.cycle_offset = 0
         self.update_cycles_completed_text()
-        self.canvas.reset_view()
+
+        if hasattr(self.active_canvas, "reset_view"):
+            self.active_canvas.reset_view()
+        elif hasattr(self.active_canvas, "snap_side_view"):
+            self.active_canvas.snap_side_view()
+
         self.update_cycle_inspector_range()
-        self.canvas.render()
+        self.active_canvas.render()
         self.update_history_buttons()
         self.show_status("Reset simulation.")
 
@@ -2287,16 +2300,21 @@ class Gui(wx.Frame):
             self.show_no_loaded_circuit_error()
             return
 
-        # Only clear what is drawn - do not reset the circuit itself
         self.monitors.reset_monitors()
         self.cycles_completed = 0
         self.simulation_history = []
         self.redo_history = []
-        self.canvas.cycle_offset = self.total_cycles_completed
+        self.canvas_2d.cycle_offset = self.total_cycles_completed
+        self.canvas_3d.cycle_offset = self.total_cycles_completed
         self.update_cycles_completed_text()
-        self.canvas.reset_view()
+
+        if hasattr(self.active_canvas, "reset_view"):
+            self.active_canvas.reset_view()
+        elif hasattr(self.active_canvas, "snap_side_view"):
+            self.active_canvas.snap_side_view()
+
         self.update_cycle_inspector_range()
-        self.canvas.render()
+        self.active_canvas.render()
         self.update_history_buttons()
         self.show_status("Cleared traces.")
 
@@ -2307,23 +2325,37 @@ class Gui(wx.Frame):
 
     def on_zoom_in(self, event):
         """Zoom into the waveform display from the View menu or shortcut."""
-        self.canvas.zoom_at_canvas_centre(1.25)
+        if hasattr(self.active_canvas, "zoom_at_canvas_centre"):
+            self.active_canvas.zoom_at_canvas_centre(1.25)
+        else:
+            self.active_canvas.zoom *= 1.25
+            self.active_canvas.init = False
+            self.active_canvas.Refresh()
         self.SetStatusText("Zoomed in")
 
     def on_zoom_out(self, event):
         """Zoom out of the waveform display from the View menu or shortcut."""
-        self.canvas.zoom_at_canvas_centre(0.8)
+        if hasattr(self.active_canvas, "zoom_at_canvas_centre"):
+            self.active_canvas.zoom_at_canvas_centre(0.8)
+        else:
+            self.active_canvas.zoom *= 0.8
+            self.active_canvas.init = False
+            self.active_canvas.Refresh()
         self.SetStatusText("Zoomed out")
 
     def on_reset_view(self, event):
         """Reset waveform pan and zoom from the view menu or shortcut."""
-        self.canvas.reset_view()
+        if hasattr(self.active_canvas, "reset_view"):
+            self.active_canvas.reset_view()
+        elif hasattr(self.active_canvas, "snap_side_view"):
+            self.active_canvas.snap_side_view()
         self.SetStatusText("Reset view")
 
     def on_toggle_cycle_inspector(self, event):
         """Show or hide the cycle inspector controls and canvas cursor."""
         inspector_is_visible = self.cycle_inspector_menu_item.IsChecked()
-        self.canvas.cycle_inspector_enabled = inspector_is_visible
+        self.canvas_2d.cycle_inspector_enabled = inspector_is_visible
+        self.canvas_3d.cycle_inspector_enabled = inspector_is_visible
 
         if inspector_is_visible:
             self.update_cycle_inspector_range()
@@ -2334,7 +2366,7 @@ class Gui(wx.Frame):
             self.SetStatusText("Hidden cycle inspector")
 
         self.Layout()
-        self.canvas.render()
+        self.active_canvas.render()
 
     def on_cycle_inspector_slider(self, event):
         """Update the inspected cycle when the slider is moved."""
@@ -2344,13 +2376,12 @@ class Gui(wx.Frame):
         else:
             cycle_index = slider_value - 1
         self.set_cycle_inspector_index(cycle_index)
-        self.canvas.render()
+        self.active_canvas.render()
 
     def on_cycle_inspector_entry(self, event):
         """Jump to the cycle typed into the cycle inspector entry."""
         try:
             cycle_number = int(self.cycle_inspector_entry.GetValue())
-
         except ValueError:
             self.update_cycle_inspector_label()
             if hasattr(event, "Skip"):
@@ -2358,7 +2389,7 @@ class Gui(wx.Frame):
             return
 
         self.set_cycle_inspector_index(self.cycle_number_to_cycle_index(cycle_number))
-        self.canvas.render()
+        self.active_canvas.render()
         if hasattr(event, "Skip"):
             event.Skip()
 
@@ -2412,6 +2443,10 @@ class Gui(wx.Frame):
             self.show_status("Error: no monitors to export.")
             return
 
+        if not hasattr(self.active_canvas, "save_image"):
+            self.show_status("Error: Image export is only supported in 2D view.")
+            return
+
         with wx.FileDialog(
             self,
             "Export waveform image",
@@ -2423,7 +2458,7 @@ class Gui(wx.Frame):
                 if not file_path.lower().endswith(".png"):
                     file_path += ".png"
 
-                if self.canvas.save_image(file_path):
+                if self.active_canvas.save_image(file_path):
                     self.show_status(f"Exported waveform image to {file_path}.")
                 else:
                     self.show_status("Error: could not export waveform image.")
@@ -2524,17 +2559,17 @@ class Gui(wx.Frame):
 
         """
         self.theme = THEMES[self.theme_name]
-        self.canvas.theme = self.theme
-        self.canvas.init = False
+        self.canvas_2d.theme = self.theme
+        self.canvas_2d.init = False
+        self.canvas_3d.theme = self.theme
+        self.canvas_3d.init = False
 
         if self.theme_name == "dark":
             self.theme_menu_item.SetItemLabel("Switch to light mode\tctrl+shift+T")
-        else:
-            self.theme_menu_item.SetItemLabel("Switch to dark mode\tctrl+shift+T")
-        if self.theme_name == "dark":
             undo_icon_path = DARK_UNDO_ICON_PATH
             redo_icon_path = DARK_REDO_ICON_PATH
         else:
+            self.theme_menu_item.SetItemLabel("Switch to dark mode\tctrl+shift+T")
             undo_icon_path = LIGHT_UNDO_ICON_PATH
             redo_icon_path = LIGHT_REDO_ICON_PATH
 
@@ -2583,7 +2618,7 @@ class Gui(wx.Frame):
         self.update_history_buttons()
         self.Layout()
         self.Refresh()
-        self.canvas.Refresh()
+        self.active_canvas.Refresh()
 
     def apply_theme_to_control(self, control):
         """Apply the current theme to one wx control."""
@@ -2843,8 +2878,9 @@ class Gui(wx.Frame):
         monitors = Monitors(names, devices, network)
         parser_output = io.StringIO()
 
-        with contextlib.redirect_stdout(parser_output), contextlib.redirect_stderr(
-            parser_output
+        with (
+            contextlib.redirect_stdout(parser_output),
+            contextlib.redirect_stderr(parser_output),
         ):
             scanner = Scanner(path, names)
             parser = Parser(names, devices, network, monitors, scanner)
@@ -2871,10 +2907,15 @@ class Gui(wx.Frame):
         self.redo_history = []
         self.module_signal_expanded_paths = set()
 
-        self.canvas.devices = devices
-        self.canvas.monitors = monitors
-        self.canvas.cycle_offset = 0
-        self.canvas.reset_view()
+        self.canvas_2d.devices = devices
+        self.canvas_2d.monitors = monitors
+        self.canvas_2d.cycle_offset = 0
+        self.canvas_2d.reset_view()
+
+        self.canvas_3d.devices = devices
+        self.canvas_3d.monitors = monitors
+        self.canvas_3d.cycle_offset = 0
+        self.canvas_3d.snap_side_view()
 
         self.update_cycles_completed_text()
         self.update_module_signal_rows()
@@ -2885,7 +2926,7 @@ class Gui(wx.Frame):
         self.update_cycle_inspector_range()
         self.SetTitle(f"Logic Simulator - {path}")
         self.show_status(f"Loaded {path}.")
-        self.canvas.render()
+        self.active_canvas.render()
         return True
 
     def export_traces_to_csv(self, file_path):
@@ -2914,7 +2955,7 @@ class Gui(wx.Frame):
             writer.writerow(header_row)
 
             for cycle in range(max_trace_length):
-                row = [self.canvas.cycle_offset + cycle + 1]
+                row = [self.active_canvas.cycle_offset + cycle + 1]
                 for monitor in monitor_list:
                     if cycle < len(monitor.trace):
                         row.append(self.signal_to_csv_text(monitor.trace[cycle]))
@@ -3451,7 +3492,7 @@ class Gui(wx.Frame):
             self.show_status(f"Error: could not remove monitor for {monitor_name}.")
 
         self.update_monitor_rows()
-        self.canvas.render()
+        self.active_canvas.render()
 
     # SWITCH AND MONITOR EVENT HANDLERS
 
@@ -3543,12 +3584,10 @@ class Gui(wx.Frame):
         else:
             self.show_status(f"Error: {signal_name} is not monitored.")
 
-        # Removing a monitor changes only this row in the available signals
-        # panel so update this button instead of rebuilding the full panel
         button = self.module_signal_action_buttons[signal_name]
         self.update_available_signal_button(button, signal_name)
         self.module_signal_rows.Scroll(scroll_x, scroll_y)
-        self.canvas.render()
+        self.active_canvas.render()
 
     def add_monitor_by_name(self, monitor_name, refresh_available_signals=True):
         """Add a named signal to the monitor list.
@@ -3585,8 +3624,6 @@ class Gui(wx.Frame):
             cycles_completed=self.cycles_completed,
         )
 
-        # make_monitor returns an error code, so decode it if it fails or
-        # confirm success if it works
         if error_type == self.monitors.NO_ERROR:
             self.simulation_history = []
             self.redo_history = []
@@ -3601,11 +3638,10 @@ class Gui(wx.Frame):
                 f"Error: could not add monitor for {monitor_name}. "
                 f"{self.monitor_error_message(error_type)}."
             )
-
         else:
             self.show_status(
                 f"Error: could not add monitor for {monitor_name}. "
                 f"{self.monitor_error_message(error_type)}."
             )
 
-        self.canvas.render()
+        self.active_canvas.render()
