@@ -80,7 +80,7 @@ class Canvas3D(wxcanvas.GLCanvas):
         self.cycle_offset = 0
         self.cycle_inspector_enabled = False
         self.cycle_inspector_index = 0
-        self.trace_bg_mode = 2  # 0: Transparent, 1: Grid Only, 2: Normal/Full
+        self.trace_bg_mode = 2
         self.render_size_override = None
         self.theme = {
             "canvas_bg": (0.08, 0.09, 0.1),
@@ -135,7 +135,6 @@ class Canvas3D(wxcanvas.GLCanvas):
 
         self.SetCurrent(self.context)
 
-        # Scale for macOS Retina / High-DPI Linux displays
         scale = self.GetContentScaleFactor()
         vp_width = int(size.width * scale)
         vp_height = int(size.height * scale)
@@ -143,7 +142,6 @@ class Canvas3D(wxcanvas.GLCanvas):
         bg = self.theme.get("canvas_bg", (0, 0, 0))
         GL.glClearColor(bg[0], bg[1], bg[2], 1.0)
 
-        # Use scaled width/height for the viewport and projection
         GL.glViewport(0, 0, vp_width, vp_height)
         GL.glMatrixMode(GL.GL_PROJECTION)
         GL.glLoadIdentity()
@@ -190,7 +188,6 @@ class Canvas3D(wxcanvas.GLCanvas):
         if size.width == 0 or size.height == 0:
             return None
 
-        # Apply scaling to match the High-DPI viewport
         scale = self.GetContentScaleFactor()
         vp_width = int(size.width * scale)
         vp_height = int(size.height * scale)
@@ -209,10 +206,8 @@ class Canvas3D(wxcanvas.GLCanvas):
         modelview = GL.glGetDoublev(GL.GL_MODELVIEW_MATRIX)
         projection = GL.glGetDoublev(GL.GL_PROJECTION_MATRIX)
 
-        # Build the viewport array manually using scaled dimensions
         viewport = (0, 0, vp_width, vp_height)
 
-        # Scale mouse coordinates to match the physical viewport
         win_y = float(vp_height - (screen_y * scale))
         win_x = float(screen_x * scale)
 
@@ -348,13 +343,11 @@ class Canvas3D(wxcanvas.GLCanvas):
         GL.glEnable(GL.GL_BLEND)
         GL.glBlendFunc(GL.GL_SRC_ALPHA, GL.GL_ONE_MINUS_SRC_ALPHA)
 
-        # Pull explicit colors from the theme dictionary
         plane_bg_colour = self.theme.get("canvas_grid", (0.5, 0.5, 0.5))
         line_colour = self.theme.get("canvas_axis", (0.5, 0.5, 0.5))
         pad = 20.0
 
         if self.trace_bg_mode == 2:
-            # Bump alpha to 0.35 so the plane stands out slightly from the canvas
             GL.glColor4f(
                 plane_bg_colour[0], plane_bg_colour[1], plane_bg_colour[2], 0.35
             )
@@ -375,7 +368,6 @@ class Canvas3D(wxcanvas.GLCanvas):
             GL.glDisableClientState(GL.GL_VERTEX_ARRAY)
 
         if self.trace_bg_mode in (1, 2):
-            # Use the high-contrast axis colour for the grid lines
             GL.glColor4f(line_colour[0], line_colour[1], line_colour[2], 0.25)
 
             y_vals = np.arange(0, max_y + pad + 1, 30, dtype=np.float32)
@@ -624,7 +616,6 @@ class Canvas3D(wxcanvas.GLCanvas):
         GL.glEnable(GL.GL_BLEND)
         GL.glBlendFunc(GL.GL_SRC_ALPHA, GL.GL_ONE_MINUS_SRC_ALPHA)
 
-        # Pull the accent color from the theme instead of using hardcoded yellow
         slice_colour = self.theme.get("canvas_trace", (0.2, 0.6, 1.0))
         GL.glColor4f(slice_colour[0], slice_colour[1], slice_colour[2], 0.25)
 
@@ -703,10 +694,8 @@ class Canvas3D(wxcanvas.GLCanvas):
             self._needs_framing_on_show = True
             return
 
-        # Figure out exactly which planes have signals and how tall they are
         signal_groups = self.categorise_signals()
 
-        # 1. DYNAMIC Z-CENTER: Find the midpoint of only the active planes
         active_z_depths = [
             self.z_planes[group] for group, signals in signal_groups.items() if signals
         ]
@@ -716,7 +705,6 @@ class Canvas3D(wxcanvas.GLCanvas):
         else:
             self.focal_z = -150.0
 
-        # 2. TRUE Y-CENTER: Height is based on the tallest single plane, not total signals
         max_signals_in_a_plane = max(
             [len(sigs) for sigs in signal_groups.values()] + [0]
         )
@@ -726,13 +714,11 @@ class Canvas3D(wxcanvas.GLCanvas):
         amplitude_y = 15.0
         start_x = -150.0
 
-        # The lowest drawn item is the axis label at Y = -40
         min_y = -40.0
         max_y = max(0, max_signals_in_a_plane - 1) * spacing_y + amplitude_y
         total_height = max_y - min_y
         self.focal_y = min_y + (total_height / 2.0)
 
-        # 3. TRUE X-CENTER: Account for the labels drawn to the left of the origin
         max_len = max(
             [len(m.trace) for m in self.monitors.monitors_dictionary.values()] + [10]
         )
@@ -741,7 +727,6 @@ class Canvas3D(wxcanvas.GLCanvas):
         total_width = max_x - min_x
         self.focal_x = min_x + (total_width / 2.0)
 
-        # 4. TIGHT ZOOM: Calculate exact distance required based on the new bounds
         aspect = size.width / size.height
         pad_x = 80.0
         pad_y = 80.0
@@ -758,8 +743,6 @@ class Canvas3D(wxcanvas.GLCanvas):
         proj_dist_x = dist_x * (1.0 + np.sin(yaw_rad) * 0.5)
         proj_dist_y = dist_y * (1.0 + np.sin(pitch_rad) * 0.5)
 
-        # Pull camera back slightly if there is a massive depth gap
-        # (prevents front plane clipping in perspective)
         z_depth_spread = 0
         if active_z_depths:
             z_depth_spread = (max(active_z_depths) - min(active_z_depths)) / 2.0

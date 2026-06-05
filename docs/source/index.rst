@@ -27,6 +27,7 @@ and the text-based user interface.
    syntax_spec
    devices
    gui
+   gui_3D
    monitors
    names
    network
