@@ -13,6 +13,7 @@ import contextlib
 import csv
 import io
 import os
+import sys
 
 import wx
 import wx.glcanvas as wxcanvas
@@ -37,6 +38,17 @@ def initialise_glut_once():
         GLUT.glutInit()
         GLUT_INITIALISED = True
 
+
+if sys.platform == "win32":
+    import ctypes
+
+    try:
+        ctypes.windll.shcore.SetProcessDpiAwareness(1)
+    except Exception:
+        try:
+            ctypes.windll.user32.SetProcessDPIAware()
+        except Exception:
+            pass
 
 # Features implemented:
 # - Run the simulation for a user-specified number of cycles
@@ -1179,7 +1191,9 @@ class Gui(wx.Frame):
         theme, and disables file-dependent controls when no circuit is loaded.
 
         """
-        super().__init__(parent=None, title=title, size=(1200, 750))
+        super().__init__(parent=None, title=title)
+        scaled_size = self.FromDIP(wx.Size(1200, 750))
+        self.SetSize(scaled_size)
         base_font = self.GetFont()
         base_font.SetPointSize(max(1, base_font.GetPointSize() - 1))
         self.SetFont(base_font)
@@ -1245,7 +1259,7 @@ class Gui(wx.Frame):
         self.theme_menu_item = view_menu.Append(ID_TOGGLE_THEME, theme_label)
         self.window_menu_items = {
             "available_signals": window_menu.AppendCheckItem(
-                ID_SHOW_AVAILABLE_SIGNALS, "Show Available signals\tCtrl+1"
+                ID_SHOW_AVAILABLE_SIGNALS, "Show Available Signals\tCtrl+1"
             ),
             "simulation": window_menu.AppendCheckItem(
                 ID_SHOW_SIMULATION, "Show Simulation\tCtrl+2"
@@ -1628,26 +1642,25 @@ class Gui(wx.Frame):
     def on_keyboard_shortcuts_help(self, event):
         """Show all keyboard shortcuts registered by the accelerator table."""
         wx.MessageBox(
-            "F1: quick start help\n"
-            "Space: run the selected number of cycles\n"
-            "Right arrow: run one cycle\n"
-            "Ctrl+Space: play or pause live tracing\n"
-            "Ctrl+Z: undo one cycle\n"
-            "Ctrl+Y: redo one cycle\n"
-            "Ctrl+O: open a circuit file\n"
-            "Ctrl+=: zoom in\n"
-            "Ctrl+-: zoom out\n"
-            "Ctrl+0: reset waveform view\n"
-            "Ctrl+I: show or hide cycle inspector\n"
-            "Ctrl+Shift+T: switch light/dark mode\n"
-            "Ctrl+Shift+P: export waveform as PNG\n"
-            "Ctrl+Shift+E: export traces as CSV\n"
-            "Ctrl+1: show Available signals panel\n"
-            "Ctrl+2: show Simulation panel\n"
-            "Ctrl+3: show Switches panel\n"
-            "Ctrl+4: show Console panel\n"
-            "Delete: clear console messages\n"
-            "Ctrl+Q: exit",
+            "F1: Quick start help\n"
+            "Space: Run the selected number of cycles\n"
+            "Right arrow: Run one cycle\n"
+            "Ctrl+Space: Play or pause live tracing\n"
+            "Ctrl+Z: Undo one cycle\n"
+            "Ctrl+Y: Redo one cycle\n"
+            "Ctrl+O: Open a circuit file\n"
+            "Ctrl+=: Zoom in\n"
+            "Ctrl+-: Zoom out\n"
+            "Ctrl+0: Reset waveform view\n"
+            "Ctrl+I: Show or hide cycle inspector\n"
+            "Ctrl+Shift+P: Export waveform as PNG\n"
+            "Ctrl+Shift+E: Export traces as CSV\n"
+            "Ctrl+1: Show Available Signals panel\n"
+            "Ctrl+2: Show Simulation panel\n"
+            "Ctrl+3: Show Switches panel\n"
+            "Ctrl+4: Show Console panel\n"
+            "Delete: Clear console messages\n"
+            "Ctrl+Q: Exit",
             "Keyboard Shortcuts",
             wx.ICON_INFORMATION | wx.OK,
         )

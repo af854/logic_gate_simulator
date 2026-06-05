@@ -5,6 +5,8 @@ dimensional space and groups inputs, nets and outputs onto separated depth
 planes for clearer visual analysis.
 """
 
+import sys
+
 import numpy as np
 import wx
 import wx.glcanvas as wxcanvas
@@ -22,8 +24,20 @@ def initialise_glut_once():
     global GLUT_INITIALISED
     if not GLUT_INITIALISED:
         try:
-            GLUT.glutInit()
+            GLUT.glutInit(sys.argv)
             GLUT_INITIALISED = True
+        except Exception:
+            pass
+
+
+if sys.platform == "win32":
+    import ctypes
+
+    try:
+        ctypes.windll.shcore.SetProcessDpiAwareness(1)
+    except Exception:
+        try:
+            ctypes.windll.user32.SetProcessDPIAware()
         except Exception:
             pass
 
@@ -61,6 +75,7 @@ class Canvas3D(wxcanvas.GLCanvas):
         self.cycle_offset = 0
         self.cycle_inspector_enabled = False
         self.cycle_inspector_index = 0
+        self.trace_bg_mode = 2  # 0: Transparent, 1: Grid Only, 2: Normal/Full
         self.render_size_override = None
         self.theme = {
             "canvas_bg": (0.08, 0.09, 0.1),
@@ -112,11 +127,24 @@ class Canvas3D(wxcanvas.GLCanvas):
         size = self.GetClientSize()
         if size.width == 0 or size.height == 0:
             return
+
         self.SetCurrent(self.context)
+
+        # Scale for macOS Retina / High-DPI Linux displays
+        scale = self.GetContentScaleFactor()
+        vp_width = int(size.width * scale)
+        vp_height = int(size.height * scale)
+
         bg = self.theme.get("canvas_bg", (0, 0, 0))
         GL.glClearColor(bg[0], bg[1], bg[2], 1.0)
-        GL.glViewport(0, 0, size.width, size.height)
+
+        # Use scaled width/height for the viewport and projection
+        GL.glViewport(0, 0, vp_width, vp_height)
         GL.glMatrixMode(GL.GL_PROJECTION)
+        GL.glLoadIdentity()
+        GLU.gluPerspective(45, vp_width / vp_height, 10, 10000)
+
+        GL.glMatrixMode(GL.GL_MODELVIEW)
         GL.glLoadIdentity()
         GLU.gluPerspective(45, size.width / size.height, 10, 10000)
         GL.glMatrixMode(GL.GL_MODELVIEW)
@@ -152,20 +180,33 @@ class Canvas3D(wxcanvas.GLCanvas):
         size = self.GetClientSize()
         if size.width == 0 or size.height == 0:
             return None
+
+        # Apply scaling to match the High-DPI viewport
+        scale = self.GetContentScaleFactor()
+        vp_width = int(size.width * scale)
+        vp_height = int(size.height * scale)
+
         GL.glMatrixMode(GL.GL_PROJECTION)
         GL.glLoadIdentity()
-        GLU.gluPerspective(45, size.width / size.height, 10, 10000)
+        GLU.gluPerspective(45, vp_width / vp_height, 10, 10000)
+
         GL.glMatrixMode(GL.GL_MODELVIEW)
         GL.glLoadIdentity()
         GL.glTranslatef(0.0, 0.0, -self.camera_distance)
         GL.glRotatef(self.camera_pitch, 1, 0, 0)
         GL.glRotatef(self.camera_yaw, 0, 1, 0)
         GL.glTranslatef(-self.focal_x, -self.focal_y, -self.focal_z)
+
         modelview = GL.glGetDoublev(GL.GL_MODELVIEW_MATRIX)
         projection = GL.glGetDoublev(GL.GL_PROJECTION_MATRIX)
-        viewport = GL.glGetIntegerv(GL.GL_VIEWPORT)
-        win_y = float(viewport[3] - screen_y)
-        win_x = float(screen_x)
+
+        # Build the viewport array manually using scaled dimensions
+        viewport = (0, 0, vp_width, vp_height)
+
+        # Scale mouse coordinates to match the physical viewport
+        win_y = float(vp_height - (screen_y * scale))
+        win_x = float(screen_x * scale)
+
         try:
             near_pt = GLU.gluUnProject(
                 win_x, win_y, 0.0, modelview, projection, viewport
@@ -277,31 +318,67 @@ class Canvas3D(wxcanvas.GLCanvas):
 
         This visually groups signals for inputs, nets and outputs.
         """
+        if self.trace_bg_mode == 0:
+            return  # Mode 0: Transparent (render nothing)
+
         GL.glDisable(GL.GL_LIGHTING)
+        GL.glDisable(GL.GL_CULL_FACE)  # Ensure backface culling is explicitly off
         GL.glEnable(GL.GL_BLEND)
         GL.glBlendFunc(GL.GL_SRC_ALPHA, GL.GL_ONE_MINUS_SRC_ALPHA)
+
         grid_colour = self.theme.get("canvas_grid", (0.5, 0.5, 0.5))
-        GL.glColor4f(grid_colour[0], grid_colour[1], grid_colour[2], 0.15)
-        pad = 20
-        GL.glBegin(GL.GL_QUADS)
-        GL.glVertex3f(start_x - pad, -pad, z_depth)
-        GL.glVertex3f(max_x + pad, -pad, z_depth)
-        GL.glVertex3f(max_x + pad, max_y + pad, z_depth)
-        GL.glVertex3f(start_x - pad, max_y + pad, z_depth)
-        GL.glEnd()
-        GL.glColor4f(grid_colour[0], grid_colour[1], grid_colour[2], 0.3)
-        GL.glBegin(GL.GL_LINES)
-        y = 0
-        while y <= max_y + pad:
-            GL.glVertex3f(start_x - pad, y, z_depth)
-            GL.glVertex3f(max_x + pad, y, z_depth)
-            y += 30
-        x = start_x
-        while x <= max_x + pad:
-            GL.glVertex3f(x, -pad, z_depth)
-            GL.glVertex3f(x, max_y + pad, z_depth)
-            x += 100
-        GL.glEnd()
+        pad = 20.0
+
+        # --- MODE 2: Normal (Full Plane Background) ---
+        if self.trace_bg_mode == 2:
+            GL.glColor4f(grid_colour[0], grid_colour[1], grid_colour[2], 0.15)
+
+            # Vectorised Quad Array (4 vertices)
+            quad_verts = np.array(
+                [
+                    [start_x - pad, -pad, z_depth],
+                    [max_x + pad, -pad, z_depth],
+                    [max_x + pad, max_y + pad, z_depth],
+                    [start_x - pad, max_y + pad, z_depth],
+                ],
+                dtype=np.float32,
+            )
+
+            GL.glEnableClientState(GL.GL_VERTEX_ARRAY)
+            GL.glVertexPointer(3, GL.GL_FLOAT, 0, quad_verts)
+            GL.glDrawArrays(GL.GL_QUADS, 0, 4)
+            GL.glDisableClientState(GL.GL_VERTEX_ARRAY)
+
+        # --- MODES 1 & 2: Grid Lines ---
+        if self.trace_bg_mode in (1, 2):
+            GL.glColor4f(grid_colour[0], grid_colour[1], grid_colour[2], 0.3)
+
+            # 1. Vectorised Horizontal Lines
+            y_vals = np.arange(0, max_y + pad + 1, 30, dtype=np.float32)
+            h_lines = np.zeros((len(y_vals), 2, 3), dtype=np.float32)
+            h_lines[:, 0, 0] = start_x - pad
+            h_lines[:, 1, 0] = max_x + pad
+            h_lines[:, :, 1] = y_vals[:, np.newaxis]
+            h_lines[:, :, 2] = z_depth
+
+            # 2. Vectorised Vertical Lines
+            x_vals = np.arange(start_x, max_x + pad + 1, 100, dtype=np.float32)
+            v_lines = np.zeros((len(x_vals), 2, 3), dtype=np.float32)
+            v_lines[:, :, 0] = x_vals[:, np.newaxis]
+            v_lines[:, 0, 1] = -pad
+            v_lines[:, 1, 1] = max_y + pad
+            v_lines[:, :, 2] = z_depth
+
+            # Combine all lines and draw in a single OpenGL batch
+            all_lines = np.ascontiguousarray(
+                np.concatenate([h_lines.reshape(-1, 3), v_lines.reshape(-1, 3)], axis=0)
+            )
+
+            GL.glEnableClientState(GL.GL_VERTEX_ARRAY)
+            GL.glVertexPointer(3, GL.GL_FLOAT, 0, all_lines)
+            GL.glDrawArrays(GL.GL_LINES, 0, len(all_lines))
+            GL.glDisableClientState(GL.GL_VERTEX_ARRAY)
+
         GL.glDisable(GL.GL_BLEND)
         GL.glEnable(GL.GL_LIGHTING)
 
@@ -645,6 +722,9 @@ class Canvas3D(wxcanvas.GLCanvas):
             self.snap_side_view()
         elif keycode == ord("3") or keycode == ord("T"):
             self.snap_top_view()
+        elif keycode == ord("B"):
+            self.trace_bg_mode = (self.trace_bg_mode + 1) % 3
+            self.Refresh()
         event.Skip()
 
     def on_paint(self, event):
@@ -652,6 +732,12 @@ class Canvas3D(wxcanvas.GLCanvas):
 
         This delegates directly to the render routine.
         """
+        _ = wx.PaintDC(self)
+
+        if not self.IsShownOnScreen():
+            return
+
+        self.SetCurrent(self.context)
         self.render()
 
     def on_size(self, event):
@@ -669,6 +755,9 @@ class Canvas3D(wxcanvas.GLCanvas):
         Dragging moves the camera and the mouse wheel zooms toward the
         pointer.
         """
+        if not self.IsShownOnScreen():
+            event.Skip()
+            return
         self.SetCurrent(self.context)
         if event.ButtonDown():
             self.last_mouse_x = event.GetX()
