@@ -223,7 +223,7 @@ class Canvas3D(wxcanvas.GLCanvas):
         GL.glClear(GL.GL_COLOR_BUFFER_BIT | GL.GL_DEPTH_BUFFER_BIT)
         if not self.monitors.monitors_dictionary:
             self.render_text(
-                "No active monitors. Add signals to see 3D Data Flow.",
+                "No active monitors. Add signals to see 3D view.",
                 -50,
                 0,
                 0,

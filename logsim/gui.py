@@ -1212,9 +1212,9 @@ class Gui(wx.Frame):
         help_menu = wx.Menu()
         menu_bar = wx.MenuBar()
 
-        file_menu.Append(ID_OPEN_FILE, "&Open...\tctrl+O")
+        file_menu.Append(ID_OPEN_FILE, "&Open...\tCtrl+O")
         file_menu.AppendSeparator()
-        file_menu.Append(wx.ID_EXIT, "&Exit\tctrl+Q")
+        file_menu.Append(wx.ID_EXIT, "&Exit\tCtrl+Q")
         help_menu.Append(ID_HELP, "&Quick start\tF1")
         help_menu.Append(ID_HELP_SHORTCUTS, "&Keyboard shortcuts")
         help_menu.Append(ID_HELP_SYNTAX, "&Circuit file syntax")
@@ -1222,39 +1222,39 @@ class Gui(wx.Frame):
         help_menu.Append(ID_HELP_EXTERNAL_DOCS, "External &documentation")
         help_menu.AppendSeparator()
         help_menu.Append(wx.ID_ABOUT, "&About")
-        export_menu.Append(ID_EXPORT_IMAGE, "Export as PNG\tctrl+shift+P")
-        export_menu.Append(ID_EXPORT_CSV, "Export as CSV\tctrl+shift+E")
-        view_menu.Append(ID_ZOOM_IN, "Zoom in\tctrl+=")
-        view_menu.Append(ID_ZOOM_OUT, "Zoom out\tctrl+-")
-        view_menu.Append(ID_RESET_VIEW, "Reset view\tctrl+0")
+        export_menu.Append(ID_EXPORT_IMAGE, "Export as PNG\tCtrl+Shift+P")
+        export_menu.Append(ID_EXPORT_CSV, "Export as CSV\tCtrl+Shift+E")
+        view_menu.Append(ID_ZOOM_IN, "Zoom in\tCtrl+=")
+        view_menu.Append(ID_ZOOM_OUT, "Zoom out\tCtrl+-")
+        view_menu.Append(ID_RESET_VIEW, "Reset view\tCtrl+0")
         view_menu.AppendSeparator()
 
         self.cycle_inspector_menu_item = view_menu.AppendCheckItem(
             ID_TOGGLE_CYCLE_INSPECTOR, "Show cycle inspector"
         )
         self.view_3d_menu_item = view_menu.AppendCheckItem(
-            ID_TOGGLE_3D, "Enable 3D Data Flow View\tctrl+D"
+            ID_TOGGLE_3D, "Enable 3D view\tCtrl+D"
         )
         view_menu.AppendSeparator()
 
         if self.theme_name == "dark":
-            theme_label = "Switch to light mode\tctrl+shift+T"
+            theme_label = "Switch to light mode\tCtrl+Shift+T"
         else:
-            theme_label = "Switch to dark mode\tctrl+shift+T"
+            theme_label = "Switch to dark mode\tCtrl+Shift+T"
 
         self.theme_menu_item = view_menu.Append(ID_TOGGLE_THEME, theme_label)
         self.window_menu_items = {
             "available_signals": window_menu.AppendCheckItem(
-                ID_SHOW_AVAILABLE_SIGNALS, "Show Available signals\tctrl+1"
+                ID_SHOW_AVAILABLE_SIGNALS, "Show Available signals\tCtrl+1"
             ),
             "simulation": window_menu.AppendCheckItem(
-                ID_SHOW_SIMULATION, "Show Simulation\tctrl+2"
+                ID_SHOW_SIMULATION, "Show Simulation\tCtrl+2"
             ),
             "switches": window_menu.AppendCheckItem(
-                ID_SHOW_SWITCHES, "Show Switches\tctrl+3"
+                ID_SHOW_SWITCHES, "Show Switches\tCtrl+3"
             ),
             "console": window_menu.AppendCheckItem(
-                ID_SHOW_CONSOLE, "Show Console\tctrl+4"
+                ID_SHOW_CONSOLE, "Show Console\tCtrl+4"
             ),
         }
 
@@ -2250,7 +2250,7 @@ class Gui(wx.Frame):
         if is_3d:
             self.canvas_2d.Hide()
             self.canvas_3d.Show()
-            self.show_status("Switched to 3D Data Flow view")
+            self.show_status("Switched to 3D view")
         else:
             self.canvas_3d.Hide()
             self.canvas_2d.Show()
@@ -2565,11 +2565,11 @@ class Gui(wx.Frame):
         self.canvas_3d.init = False
 
         if self.theme_name == "dark":
-            self.theme_menu_item.SetItemLabel("Switch to light mode\tctrl+shift+T")
+            self.theme_menu_item.SetItemLabel("Switch to light mode\tCtrl+Shift+T")
             undo_icon_path = DARK_UNDO_ICON_PATH
             redo_icon_path = DARK_REDO_ICON_PATH
         else:
-            self.theme_menu_item.SetItemLabel("Switch to dark mode\tctrl+shift+T")
+            self.theme_menu_item.SetItemLabel("Switch to dark mode\tCtrl+Shift+T")
             undo_icon_path = LIGHT_UNDO_ICON_PATH
             redo_icon_path = LIGHT_REDO_ICON_PATH
 
