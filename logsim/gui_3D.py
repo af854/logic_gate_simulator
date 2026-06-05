@@ -1,7 +1,7 @@
 """Implement the 3D graphical user interface for the Logic Simulator.
 
 This module defines an OpenGL canvas that renders signal traces in three
-dimensional space and groups inputs, nets and outputs onto separated depth
+dimensional space and groups inputs, internals and outputs onto separated depth
 planes for clearer visual analysis.
 """
 
@@ -314,6 +314,7 @@ class Canvas3D(wxcanvas.GLCanvas):
             ordered_signals = list(reversed(signals))
             for name, monitor in ordered_signals:
                 trace_colour = self.theme.get("canvas_trace", (0.11, 0.45, 0.95))
+                GL.glDepthMask(GL.GL_FALSE)
                 self.render_text(
                     name,
                     start_x - 60,
@@ -321,6 +322,7 @@ class Canvas3D(wxcanvas.GLCanvas):
                     z_depth + 4,
                     colour=self.theme.get("canvas_text"),
                 )
+                GL.glDepthMask(GL.GL_TRUE)
                 GL.glColor3f(*trace_colour)
                 self.draw_3d_ribbon(
                     monitor.trace, start_x, current_y, z_depth, step_x, amplitude_y
@@ -328,7 +330,15 @@ class Canvas3D(wxcanvas.GLCanvas):
                 current_y += spacing_y
         if self.cycle_inspector_enabled and max_trace_len > 0:
             inspector_x = start_x + self.cycle_inspector_index * step_x + step_x / 2.0
-            self.draw_cycle_inspector_slice(inspector_x, global_max_y)
+            signal_groups = self.categorise_signals()
+            self.draw_cycle_inspector_slice(
+                inspector_x,
+                global_max_y,
+                signal_groups,
+                start_x,
+                spacing_y,
+                amplitude_y,
+            )
         GL.glLineWidth(1.0)
         GL.glFlush()
         self.SwapBuffers()
@@ -610,8 +620,10 @@ class Canvas3D(wxcanvas.GLCanvas):
         GL.glDisableClientState(GL.GL_NORMAL_ARRAY)
         GL.glDisableClientState(GL.GL_VERTEX_ARRAY)
 
-    def draw_cycle_inspector_slice(self, inspector_x, max_y):
-        """Draw a translucent vertical slice through the 3D stack."""
+    def draw_cycle_inspector_slice(
+        self, inspector_x, max_y, signal_groups, start_x, spacing_y, amplitude_y
+    ):
+        """Draw a translucent vertical slice through the 3D stack with value labels."""
         GL.glDisable(GL.GL_LIGHTING)
         GL.glEnable(GL.GL_BLEND)
         GL.glBlendFunc(GL.GL_SRC_ALPHA, GL.GL_ONE_MINUS_SRC_ALPHA)
@@ -625,6 +637,7 @@ class Canvas3D(wxcanvas.GLCanvas):
         y_top = max_y + 30
         thickness = 1.0
 
+        GL.glDepthMask(GL.GL_FALSE)
         GL.glBegin(GL.GL_QUADS)
         GL.glVertex3f(inspector_x - thickness, y_bottom, z_front)
         GL.glVertex3f(inspector_x - thickness, y_top, z_front)
@@ -639,6 +652,32 @@ class Canvas3D(wxcanvas.GLCanvas):
         GL.glVertex3f(inspector_x + thickness, y_top, z_back)
         GL.glVertex3f(inspector_x - thickness, y_top, z_back)
         GL.glEnd()
+        GL.glDepthMask(GL.GL_TRUE)
+
+        # Draw value labels for each trace with depth testing
+        for group_name, signals in signal_groups.items():
+            if not signals:
+                continue
+            z_depth = self.z_planes[group_name]
+            current_y = 0
+            ordered_signals = list(reversed(signals))
+            for name, monitor in ordered_signals:
+                if self.cycle_inspector_index < len(monitor.trace):
+                    value_text = self.signal_to_display_text(
+                        monitor.trace[self.cycle_inspector_index]
+                    )
+                else:
+                    value_text = "-"
+                # Position text forward from z_depth so it's on top of own plane
+                # but can be occluded by traces in front
+                self.render_text(
+                    value_text,
+                    inspector_x + 6,
+                    current_y + amplitude_y / 2,
+                    z_depth + 20,
+                    colour=self.theme.get("canvas_text"),
+                )
+                current_y += spacing_y
 
         GL.glDisable(GL.GL_BLEND)
         GL.glEnable(GL.GL_LIGHTING)
@@ -655,7 +694,7 @@ class Canvas3D(wxcanvas.GLCanvas):
         GL.glDisable(GL.GL_LIGHTING)
         GL.glColor3f(colour[0], colour[1], colour[2])
         GL.glRasterPos3f(x, y, z)
-        font = GLUT.GLUT_BITMAP_HELVETICA_12
+        font = GLUT.GLUT_BITMAP_HELVETICA_18
         for char in text:
             if char == "\n":
                 y -= 15
@@ -663,6 +702,16 @@ class Canvas3D(wxcanvas.GLCanvas):
             else:
                 GLUT.glutBitmapCharacter(font, ord(char))
         GL.glEnable(GL.GL_LIGHTING)
+
+    def signal_to_display_text(self, signal):
+        """Return the compact text shown by the cycle inspector for a signal."""
+        if signal == self.devices.HIGH or signal == self.devices.RISING:
+            return "1"
+        if signal == self.devices.LOW or signal == self.devices.FALLING:
+            return "0"
+        if signal == self.devices.BLANK:
+            return "-"
+        return str(signal)
 
     def snap_reset_view(self):
         """Set the camera to an isometric side view and recalculate
