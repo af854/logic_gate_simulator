@@ -181,7 +181,7 @@ class Scanner:
                 pos = len(self._text)
                 line_num = bisect.bisect_right(self.line_starts, pos) - 1
                 line_pos = pos - self.line_starts[line_num]
-                return Symbol(self.EOF, None, line_num, line_pos)
+                return Symbol(self.EOF, None, line_num, line_pos, "")
 
             group = match.lastgroup
 
@@ -199,7 +199,7 @@ class Scanner:
 
             if group == "PUNCTUATION":
                 sym_type = self.punct_map[string_val]
-                return Symbol(sym_type, None, line_num, line_pos)
+                return Symbol(sym_type, None, line_num, line_pos, string_val)
 
             elif group == "NUMBER":
                 return Symbol(self.NUMBER, int(string_val), line_num, line_pos, string_val)
@@ -207,10 +207,10 @@ class Scanner:
             elif group == "NAME":
                 if string_val in self.keyword_map:
                     sym_id = self.keyword_map[string_val]
-                    return Symbol(self.KEYWORD, sym_id, line_num, line_pos)
+                    return Symbol(self.KEYWORD, sym_id, line_num, line_pos, string_val)
                 else:
                     [sym_id] = self.names.lookup([string_val])
-                    return Symbol(self.NAME, sym_id, line_num, line_pos)
+                    return Symbol(self.NAME, sym_id, line_num, line_pos, string_val)
 
     def print_error_line(self, line_num, line_pos):
         """Print the input line along with a marker indicating the error position.

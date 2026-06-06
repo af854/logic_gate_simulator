@@ -742,18 +742,23 @@ class Parser:
             # store the bad symbol in case we advance
             bad_symbol = self.symbol
             errormsg = "Expected " + expected_name
+
             if self.symbol.type == self.scanner.NUMBER:
-                errormsg += ", but names cannot start with a number."
+                errormsg += ", but names cannot start with a number: '"
+                errormsg += self.symbol.raw_text + "'."
 
             elif self.symbol.type == self.scanner.KEYWORD:
-                errormsg += ", but got a reserved keyword: "
-                errormsg += self.symbol_string()
+                errormsg += ", but got reserved keyword '"
+                errormsg += self.symbol.raw_text + "'."
 
                 if consume_reserved_keyword:
                     self.advance()
 
+            elif self.symbol.type == self.scanner.EOF:
+                errormsg += ", but reached end of file."
+
             else:
-                errormsg += "."
+                errormsg += ", but got '" + self.symbol.raw_text + "'."
 
             self.error(errormsg, bad_symbol, synchronize=True)
 
@@ -1062,7 +1067,10 @@ class Parser:
                 return None
             return "primitive", device_kind_id, None
 
-        self.error("Invalid device kind.", synchronize=True)
+        self.error(
+            "Invalid device kind: '" + self.symbol.raw_text + "'.",
+            synchronize=True,
+        )        
         return None
 
     def parse_device_statement(self):
@@ -2754,7 +2762,12 @@ class Parser:
                 )
             else:
                 self.error(
-                    "Port does not exist on module instance", output_signal.port_symbol
+                    "Port '"
+                    + output_signal.port_symbol.raw_text
+                    + "' does not exist on module instance '"
+                    + self.names.get_name_string(output_signal.main_id)
+                    + "'.",
+                    output_signal.port_symbol,
                 )
             return True
 
@@ -2804,7 +2817,11 @@ class Parser:
                     )
                 else:
                     self.error(
-                        "Port does not exist on module instance",
+                        "Port '"
+                        + input_signal.port_symbol.raw_text
+                        + "' does not exist on module instance '"
+                        + self.names.get_name_string(input_signal.main_id)
+                        + "'.",
                         input_signal.port_symbol,
                     )
                 break
@@ -3077,6 +3094,13 @@ class Parser:
                         )
                         best_error_symbol = input_signal.main_symbol
                     else:
+                        error_message = (
+                            "Input port '"
+                            + input_signal.port_symbol.raw_text
+                            + "' does not exist on device '"
+                            + self.names.get_name_string(input_signal.main_id)
+                            + "'."
+                        )
                         best_error_symbol = input_signal.port_symbol
 
                 elif connection_error_type == self.network.SECOND_DEVICE_ABSENT:
@@ -3089,6 +3113,13 @@ class Parser:
                         )
                         best_error_symbol = output_signal.main_symbol
                     else:
+                        error_message = (
+                            "Output port '"
+                            + output_signal.port_symbol.raw_text
+                            + "' does not exist on device '"
+                            + self.names.get_name_string(output_signal.main_id)
+                            + "'."
+                        )
                         best_error_symbol = output_signal.port_symbol
                 elif (
                     connection_error_type == self.network.INPUT_CONNECTED
@@ -3236,7 +3267,11 @@ class Parser:
                     break
                 if not self.is_module_instance_port(monitor_signal):
                     self.error(
-                        "Port does not exist on module instance",
+                        "Port '"
+                        + monitor_signal.port_symbol.raw_text
+                        + "' does not exist on module instance '"
+                        + self.names.get_name_string(monitor_signal.main_id)
+                        + "'.",
                         monitor_signal.port_symbol,
                     )
                     break
