@@ -248,10 +248,14 @@ class Parser:
         """
         self.symbol = self.scanner.get_symbol()
         while self.symbol.type == self.scanner.UNKNOWN:
-            self.error("Invalid symbol or character!")
+            bad_text = self.symbol.raw_text
+            if bad_text is None:
+                self.error("Invalid symbol or character!")
+            else:
+                self.error("Invalid symbol or character: '" + bad_text + "'")
             self.symbol = self.scanner.get_symbol()
 
-        # Small rolling window of recent names used to check typos
+        # Small rolling window of recent names used to check typos in section keywords
         if self.symbol.type == self.scanner.NAME:
             self.recent_names.append(self.symbol)
             self.recent_names = self.recent_names[-10:]
@@ -641,6 +645,8 @@ class Parser:
             self.devices.CLOCK,
             self.devices.SWITCH,
             self.devices.D_TYPE,
+            self.devices.RC,
+            self.devices.SIGGEN,
         ]
 
         hint = self.name_typo_hint(
@@ -678,7 +684,8 @@ class Parser:
         return (
             self.symbol.id in self.devices.gate_types
             and self.symbol.id != self.devices.XOR
-        ) or (self.symbol.id in [self.devices.CLOCK, self.devices.SWITCH])
+        ) or (self.symbol.id in [self.devices.CLOCK, self.devices.SWITCH,
+                                 self.devices.RC, self.devices.SIGGEN])
 
     def is_fixed_device(self):
         """Return True if the current symbol is a fixed device keyword.
@@ -998,22 +1005,44 @@ class Parser:
                 self.error("Expected number", synchronize=True)
                 return None
 
-            bad_parameter_symbol = self.symbol
-            device_parameter = self.symbol.id
-            self.advance()  # consume the number
+            parameter_symbol = self.symbol
+            if device_kind_id == self.devices.SIGGEN:
+                device_parameter = self.symbol.raw_text
+                # for SIGGEN we store it as a string so leading 0s are kept
+            else:
+                device_parameter = self.symbol.id            
+                
+            self.advance()  # consume the parameter
 
-            if device_kind_id == self.devices.CLOCK and device_parameter < 1:
+            if device_kind_id in [self.devices.CLOCK, self.devices.RC] and device_parameter < 1:
                 self.error("Invalid device parameter: should be 1 or greater",
-                           bad_parameter_symbol, synchronize=True)
+                           parameter_symbol, synchronize=True)
                 return None
             if device_kind_id in self.devices.gate_types and not 1 <= device_parameter <= 16:
                 self.error("Invalid device parameter: should be between 1 and 16",
-                           bad_parameter_symbol, synchronize=True)
+                           parameter_symbol, synchronize=True)
                 return None
             if device_kind_id == self.devices.SWITCH and device_parameter not in [0, 1]:
                 self.error("Invalid device parameter: should be 0 or 1",
-                           bad_parameter_symbol, synchronize=True)
+                           parameter_symbol, synchronize=True)
                 return None
+            
+            if device_kind_id == self.devices.SIGGEN:
+                siggen_param_ok = True
+                if device_parameter is None:
+                    siggen_param_ok = False
+                elif len(device_parameter) == 0:
+                    siggen_param_ok = False
+                for c in device_parameter:
+                    if c not in ['0', '1']:
+                        siggen_param_ok = False
+                if not siggen_param_ok:
+                    self.error("Invalid SIGGEN parameter: "
+                               "should be a binary pattern containing only 0 and 1",
+                               parameter_symbol,
+                               synchronize=True,
+                    )
+                    return None
 
             if self.symbol.type != self.scanner.R_BRACKET:
                 self.error("Expected ')'", synchronize=True)

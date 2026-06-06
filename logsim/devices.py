@@ -37,10 +37,20 @@ class Device:
         self.outputs = {}
 
         self.device_kind = None
+
+        # Clocks
         self.clock_half_period = None
         self.clock_counter = None
         self.switch_state = None
         self.dtype_memory = None
+
+        # RCs
+        self.rc_delay = None
+        self.rc_counter = None
+
+        # SIGGENs
+        self.siggen_pattern = None
+        self.siggen_counter = None
 
 
 class Devices:
@@ -104,7 +114,7 @@ class Devices:
         self.devices_list = []
 
         gate_strings = ["AND", "OR", "NAND", "NOR", "XOR"]
-        device_strings = ["CLOCK", "SWITCH", "DTYPE"]
+        device_strings = ["CLOCK", "SWITCH", "DTYPE", "RC", "SIGGEN"]
         dtype_inputs = ["CLK", "SET", "CLEAR", "DATA"]
         dtype_outputs = ["Q", "QBAR"]
 
@@ -127,7 +137,7 @@ class Devices:
         self.gate_types = [self.AND, self.OR, self.NAND, self.NOR, self.XOR] = (
             self.names.lookup(gate_strings)
         )
-        self.device_types = [self.CLOCK, self.SWITCH, self.D_TYPE] = self.names.lookup(
+        self.device_types = [self.CLOCK, self.SWITCH, self.D_TYPE, self.RC, self.SIGGEN] = self.names.lookup(
             device_strings
         )
         self.dtype_input_ids = [
@@ -257,6 +267,37 @@ class Devices:
         device.clock_half_period = clock_half_period
         self.cold_startup()  # clock initialised to a random point in its cycle
 
+    def make_rc(self, device_id, rc_delay):
+        """Make an RC device.
+
+        The output starts HIGH and falls LOW after rc_delay simulation cycles.
+        """
+        self.add_device(device_id, self.RC)
+        device = self.get_device(device_id)
+        device.rc_delay = rc_delay
+        device.rc_counter = 0
+        self.add_output(device_id, output_id=None, signal=self.HIGH)
+
+    def make_siggen(self, device_id, pattern):
+        """Make a SIGGEN device.
+
+        pattern is a string of 0s and 1s, e.g. "0110100".
+        The output follows the pattern periodically.
+        """
+        self.add_device(device_id, self.SIGGEN)
+        device = self.get_device(device_id)
+        device.siggen_pattern = pattern
+
+        # The initial cycle isnt shown in the GUI.
+        # So we just put LOW as the initial value.
+        # When update function in network.py is called it will
+        # start following the sequence from the first cycle that is shown
+        # on GUI. 
+        self.add_output(device_id, output_id=None, signal=self.LOW)
+
+        device.siggen_counter = 0
+    
+
     def make_gate(self, device_id, device_kind, no_of_inputs):
         """Make logic gates with the specified number of inputs."""
         self.add_device(device_id, device_kind)
@@ -295,6 +336,14 @@ class Devices:
                 self.add_output(device.device_id, output_id=None, signal=clock_signal)
                 # Initialise it to a random point in its cycle.
                 device.clock_counter = random.randrange(device.clock_half_period)
+            
+            elif device.device_kind == self.RC:
+                device.rc_counter = 0
+                device.outputs[None] = self.HIGH
+
+            elif device.device_kind == self.SIGGEN:
+                device.siggen_counter = 0
+                device.outputs[None] = self.LOW
 
     def make_device(self, device_id, device_kind, device_property=None):
         """Create the specified device.
@@ -324,6 +373,42 @@ class Devices:
             else:
                 self.make_clock(device_id, device_property)
                 error_type = self.NO_ERROR
+        
+        elif device_kind == self.RC:
+            # Device property is the RC time constant
+            # (amount of cycles it stays 1)
+            if device_property is None:
+                error_type = self.NO_QUALIFIER
+            elif device_property <= 0:
+                error_type = self.INVALID_QUALIFIER
+            else:
+                self.make_rc(device_id, device_property)
+                error_type = self.NO_ERROR
+
+        elif device_kind == self.SIGGEN:
+            # Device property is the pattern of 0s and 1s.
+            if device_property is None:
+                error_type = self.NO_QUALIFIER
+
+            # Should be a string, to deal w/ leading 0s
+            elif type(device_property) is not str:
+                error_type = self.INVALID_QUALIFIER
+
+            elif len(device_property) == 0:
+                error_type = self.INVALID_QUALIFIER
+
+            else:
+                valid_pattern = True
+                for bit in device_property:
+                    if bit != "0" and bit != "1":
+                        valid_pattern = False
+                        break
+
+                if not valid_pattern:
+                    error_type = self.INVALID_QUALIFIER
+                else:
+                    self.make_siggen(device_id, device_property)
+                    error_type = self.NO_ERROR
 
         elif device_kind in self.gate_types:
             # Device property is the number of inputs

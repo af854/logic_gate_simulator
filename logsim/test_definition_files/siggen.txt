@@ -1,0 +1,62 @@
+MODULE MUX8
+    INPUTS A, B, C, D, E, F, G, H, S0, S1, S2;
+    OUTPUTS Y;
+
+    DEVICES
+        NAND(1) N0, N1, N2;
+        AND(4) P0, P1, P2, P3, P4, P5, P6, P7;
+        OR(8) O1;
+
+    CONNECT
+        N0.I1 = S0;
+        N1.I1 = S1;
+        N2.I1 = S2;
+
+        P0.I1 = A; P0.I2 = N2; P0.I3 = N1; P0.I4 = N0;
+        P1.I1 = B; P1.I2 = N2; P1.I3 = N1; P1.I4 = S0;
+        P2.I1 = C; P2.I2 = N2; P2.I3 = S1; P2.I4 = N0;
+        P3.I1 = D; P3.I2 = N2; P3.I3 = S1; P3.I4 = S0;
+        P4.I1 = E; P4.I2 = S2; P4.I3 = N1; P4.I4 = N0;
+        P5.I1 = F; P5.I2 = S2; P5.I3 = N1; P5.I4 = S0;
+        P6.I1 = G; P6.I2 = S2; P6.I3 = S1; P6.I4 = N0;
+        P7.I1 = H; P7.I2 = S2; P7.I3 = S1; P7.I4 = S0;
+
+        O1.I1 = P0; O1.I2 = P1; O1.I3 = P2; O1.I4 = P3;
+        O1.I5 = P4; O1.I6 = P5; O1.I7 = P6; O1.I8 = P7;
+
+        Y = O1;
+
+ENDMODULE;
+
+
+DEVICES
+    SWITCH(0) S0;
+    SWITCH(0) S1;
+    SWITCH(0) S2;
+
+    SIGGEN(1011100000000000) A_SIG;  # A = .-
+    SIGGEN(1110101010000000) B_SIG;  # B = -...
+    SIGGEN(1110101110100000) C_SIG;  # C = -.-.
+    SIGGEN(1110101000000000) D_SIG;  # D = -..
+    SIGGEN(1000000000000000) E_SIG;  # E = .
+    SIGGEN(1010111010000000) F_SIG;  # F = ..-.
+    SIGGEN(1110111010000000) G_SIG;  # G = --.
+    SIGGEN(1010101000000000) H_SIG;  # H = ....
+    MUX8 MORSE_MUX;
+
+CONNECT
+    MORSE_MUX.A = A_SIG;
+    MORSE_MUX.B = B_SIG;
+    MORSE_MUX.C = C_SIG;
+    MORSE_MUX.D = D_SIG;
+    MORSE_MUX.E = E_SIG;
+    MORSE_MUX.F = F_SIG;
+    MORSE_MUX.G = G_SIG;
+    MORSE_MUX.H = H_SIG;
+
+    MORSE_MUX.S0 = S0;
+    MORSE_MUX.S1 = S1;
+    MORSE_MUX.S2 = S2;
+
+MONITOR
+    S2, S1, S0, MORSE_MUX.Y;

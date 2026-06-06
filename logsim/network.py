@@ -313,11 +313,16 @@ class Network:
 
         return True
 
-    def execute_clock(self, device_id):
-        """Simulate a clock and update its output signal value.
+    def execute_signal_source(self, device_id):
+        """Simulate a signal source and update its output signal value
+        based on whether it was set to RISING or FALLING in 
+        corresponding update_xxxs(). 
 
         Return True if successful.
         """
+        # Formerly execute_clock() 
+        # But the same logic is used for any signal source that has its
+        # output set to RISING or FALLING in functions like update_clocks()
         device = self.devices.get_device(device_id)
         output_signal = device.outputs[None]  # output ID is None
 
@@ -340,6 +345,11 @@ class Network:
 
         else:
             return False
+        
+    def execute_clock(self, device_id):
+        """Simulate a clock and update its output signal value."""
+        # A wrapper so existing calls to execute_clock still function.
+        return self.execute_signal_source(device_id)
 
     def update_clocks(self):
         """If it is time to do so, set clock signals to RISING or FALLING."""
@@ -355,6 +365,54 @@ class Network:
                 elif output_signal == self.devices.LOW:
                     device.outputs[None] = self.devices.RISING
             device.clock_counter += 1
+    
+    def update_rcs(self):
+        """Update RC devices at the start of a simulation cycle to RISING or FALLING.
+
+        RC output starts HIGH and falls LOW after rc_delay simulation cycles.
+        """
+        rc_devices = self.devices.find_devices(self.devices.RC)
+
+        for device_id in rc_devices:
+            device = self.devices.get_device(device_id)
+
+            if device.rc_counter == device.rc_delay:
+                output_signal = self.get_output_signal(device_id, output_id=None)
+
+                if output_signal == self.devices.HIGH:
+                    device.outputs[None] = self.devices.FALLING
+
+            device.rc_counter += 1
+
+    def update_siggens(self):
+        """Update SIGGEN devices at the start of a simulation cycle to RISING or FALLING,
+        based on its stored pattern. 
+        """
+        siggen_devices = self.devices.find_devices(self.devices.SIGGEN)
+
+        for device_id in siggen_devices:
+            device = self.devices.get_device(device_id)
+
+            target_char = device.siggen_pattern[device.siggen_counter]
+
+            # make_device has already validated that the chars can only
+            # be 0 or 1
+            if target_char == "0":
+                target_signal = self.devices.LOW
+            else:
+                target_signal = self.devices.HIGH
+
+            output_signal = self.get_output_signal(device_id, output_id=None)
+
+            if output_signal == self.devices.HIGH and target_signal == self.devices.LOW:
+                device.outputs[None] = self.devices.FALLING
+            elif output_signal == self.devices.LOW and target_signal == self.devices.HIGH:
+                device.outputs[None] = self.devices.RISING
+
+            device.siggen_counter += 1
+            if device.siggen_counter == len(device.siggen_pattern):
+                # Roll around
+                device.siggen_counter = 0
 
     def execute_network(self):
         """Execute all the devices in the network for one simulation cycle.
@@ -369,9 +427,13 @@ class Network:
         nand_devices = self.devices.find_devices(self.devices.NAND)
         nor_devices = self.devices.find_devices(self.devices.NOR)
         xor_devices = self.devices.find_devices(self.devices.XOR)
+        rc_devices = self.devices.find_devices(self.devices.RC)
+        siggen_devices = self.devices.find_devices(self.devices.SIGGEN)
 
-        # This sets clock signals to RISING or FALLING, where necessary
+        # This sets clocks, RCs, and siggens to RISING or FALLING, where necessary
         self.update_clocks()
+        self.update_rcs()
+        self.update_siggens()
 
         # Number of iterations to wait for the signals to settle before
         # declaring the network unstable
@@ -390,9 +452,19 @@ class Network:
             for device_id in d_type_devices:  # execute DTYPE devices
                 if not self.execute_d_type(device_id):
                     return False
+                
+            # Execute signal source devices before gates so gates see clean
+            # HIGH/LOW signal, not rising/falling
             for device_id in clock_devices:  # complete clock executions
-                if not self.execute_clock(device_id):
+                if not self.execute_signal_source(device_id):
+                    return False           
+            for device_id in rc_devices:  # complete RC executions
+                if not self.execute_signal_source(device_id):
                     return False
+            for device_id in siggen_devices:  # complete SIGGEN executions
+                if not self.execute_signal_source(device_id):
+                    return False
+                
             for device_id in and_devices:  # execute AND gate devices
                 if not self.execute_gate(device_id, self.devices.HIGH,
                                          self.devices.HIGH):

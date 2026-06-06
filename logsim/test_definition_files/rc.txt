@@ -1,0 +1,12 @@
+DEVICES
+    CLOCK(1) CLK;
+    RC(10) RC1;
+    AND(2) AND1;
+
+CONNECT
+    AND1.I1 = CLK;
+    AND1.I2 = RC1.I1;
+
+
+MONITOR
+    AND1;

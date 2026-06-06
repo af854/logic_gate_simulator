@@ -28,9 +28,9 @@ class Symbol:
         The column index within the line where the symbol begins.
     """
 
-    __slots__ = ["type", "id", "line_num", "line_pos"]
+    __slots__ = ["type", "id", "line_num", "line_pos", "raw_text"]
 
-    def __init__(self, symbol_type=None, symbol_id=None, line_num=None, line_pos=None):
+    def __init__(self, symbol_type=None, symbol_id=None, line_num=None, line_pos=None, raw_text=None):
         """Initialise symbol properties.
 
         Parameters
@@ -49,6 +49,7 @@ class Symbol:
         self.id = symbol_id
         self.line_num = line_num
         self.line_pos = line_pos
+        self.raw_text = raw_text
 
 
 class Scanner:
@@ -121,6 +122,8 @@ class Scanner:
             "SWITCH",
             "DTYPE",
             "XOR",
+            "RC",
+            "SIGGEN",
             "MODULE",
             "INPUTS",
             "OUTPUTS",
@@ -189,17 +192,17 @@ class Scanner:
             line_num = bisect.bisect_right(self.line_starts, start_index) - 1
             line_pos = start_index - self.line_starts[line_num]
 
-            if group == "UNKNOWN":
-                return Symbol(self.UNKNOWN, None, line_num, line_pos)
-
             string_val = match.group()
+
+            if group == "UNKNOWN":
+                return Symbol(self.UNKNOWN, None, line_num, line_pos, string_val)
 
             if group == "PUNCTUATION":
                 sym_type = self.punct_map[string_val]
                 return Symbol(sym_type, None, line_num, line_pos)
 
             elif group == "NUMBER":
-                return Symbol(self.NUMBER, int(string_val), line_num, line_pos)
+                return Symbol(self.NUMBER, int(string_val), line_num, line_pos, string_val)
 
             elif group == "NAME":
                 if string_val in self.keyword_map:
