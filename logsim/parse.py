@@ -234,8 +234,8 @@ class Parser:
             "ENDMODULE",
         ]
 
-        # Currently unused - will be used when error recovery is implemented
         self.error_count = 0
+        self.warning_count = 0
 
     def advance(self):
         """Advance self.symbol to the next valid scanner symbol.
@@ -382,6 +382,39 @@ class Parser:
             + " errors: unable to continue due to"
         )
         print("structural error(s) in file.")
+
+    def warning(self, warningmsg, symbol=None, hide_location=False):
+        """Print a descriptive warning message without incrementing error_count.
+
+        Arguments:
+        warningmsg -- text of the warning message to display.
+
+        Optional arguments:
+        symbol -- Symbol object whose location should be displayed. If omitted,
+        self.symbol is used.
+        hide_location -- if True, suppress the line and column display.
+
+        Effects:
+        Increments warning_count and prints the warning message. 
+        Does not prevent network building.
+        """
+        if symbol is None:
+            symbol = self.symbol
+
+        self.warning_count += 1
+
+        print("---------------------------------------------------------------")
+        print("Warning: " + warningmsg)
+
+        if not hide_location:
+            print(
+                "Line "
+                + str(symbol.line_num + 1)
+                + ", column "
+                + str(symbol.line_pos + 1)
+                + ":"
+            )
+            self.scanner.print_error_line(symbol.line_num, symbol.line_pos)
 
     def can_build_network(self):
         """Return True if network construction is still allowed.
@@ -2926,7 +2959,7 @@ class Parser:
     def check_combinational_loops(self):
         """Detect combinational loops using BFS after nets and modules are flattened.
 
-        Return False if a combinational loop is found, and True otherwise.
+        Create a warning if a combinational loop is found. 
 
         Effects:
         Builds a temporary graph from pending_connections and net_driver_dict. If a
@@ -2999,11 +3032,11 @@ class Parser:
                             device_name = " inside ".join(
                                 reversed(device_name.split("->"))
                             )
-                            self.error(
+                            self.warning(
                                 "Combinational device self-loop: " + device_name,
                                 hide_location=True,
                             )
-                            return False
+                            return
                         errormsg = "Combinational loop detected. Loop is as follows:\n"
                         for loop_device_id in path + [start_id]:
                             device_name = self.names.get_name_string(loop_device_id)
@@ -3012,14 +3045,14 @@ class Parser:
                             )
                             errormsg += "       " + device_name + "\n"
 
-                        self.error(errormsg, hide_location=True)
-                        return False
+                        self.warning(errormsg, hide_location=True)
+                        return
 
                     if next_id not in visited:
                         visited.add(next_id)
                         queue.append((next_id, path + [next_id]))
 
-        return True
+        return
 
     def resolve_and_create_connections(self):
         """Resolve all pending connections and create them in the network.
@@ -3041,8 +3074,9 @@ class Parser:
         if not self.flatten_net_driver_dict():
             return
 
-        if not self.check_combinational_loops():
-            return
+        # Per feedback in interim session, is now a warning rather than error. 
+        self.check_combinational_loops()
+        
 
         # TODO net unused / not connected to anything checks
         # may want to keep track of the net instantiation symbols for this
@@ -3311,7 +3345,18 @@ class Parser:
             error_message = self.monitor_error_message(error_type)
             error_symbol = self.symbol
 
-            if error_message is not None:
+            if error_type == self.monitors.MONITOR_PRESENT:
+                if requested_signal.port_symbol is None:
+                    warning_symbol = requested_signal.main_symbol
+                else:
+                    warning_symbol = requested_signal.port_symbol
+
+                self.warning(
+                    "Signal is already being monitored: duplicate monitor ignored",
+                    warning_symbol,
+                )
+
+            elif error_message is not None:
                 device = self.devices.get_device(device_id)
                 if device is None:
                     error_message = "Specified name does not match a device or net"
@@ -3431,7 +3476,14 @@ class Parser:
 
             if self.error_count == 0:
                 print("---------------------------------------------------------------")
-                print("SUCCESS: Parsing finished with no error\n")
+                if self.warning_count == 0:
+                    print("SUCCESS: Parsing finished with no errors\n")
+                else:
+                    print(
+                        "SUCCESS: Parsing finished with no errors and "
+                        + str(self.warning_count)
+                        + " warning(s).\n"
+                    )
                 return True
             else:
                 print("---------------------------------------------------------------")
