@@ -30,18 +30,6 @@ def initialise_glut_once():
             pass
 
 
-if sys.platform == "win32":
-    import ctypes
-
-    try:
-        ctypes.windll.shcore.SetProcessDpiAwareness(1)
-    except Exception:
-        try:
-            ctypes.windll.user32.SetProcessDPIAware()
-        except Exception:
-            pass
-
-
 class Canvas3D(wxcanvas.GLCanvas):
     """Handle the 3D drawing operations and data-flow visualisation for
     the logic simulator.
@@ -694,7 +682,7 @@ class Canvas3D(wxcanvas.GLCanvas):
         GL.glDisable(GL.GL_LIGHTING)
         GL.glColor3f(colour[0], colour[1], colour[2])
         GL.glRasterPos3f(x, y, z)
-        font = GLUT.GLUT_BITMAP_HELVETICA_18
+        font = GLUT.GLUT_BITMAP_HELVETICA_12
         for char in text:
             if char == "\n":
                 y -= 15
@@ -804,16 +792,18 @@ class Canvas3D(wxcanvas.GLCanvas):
     def on_key(self, event):
         """Handle keyboard shortcuts for the 3D camera presets.
 
-        Keys 1/F select front, 2/S select side and 3/T select top.
+        Keys F select front, R reset view, and B cycle background mode.
         """
         keycode = event.GetKeyCode()
-        if keycode == ord("1") or keycode == ord("F"):
+
+        if keycode == ord("F"):
             self.snap_front_view()
-        elif keycode == ord("2") or keycode == ord("R"):
+        elif keycode == ord("R"):
             self.snap_reset_view()
         elif keycode == ord("B"):
             self.trace_bg_mode = (self.trace_bg_mode + 1) % 3
             self.Refresh()
+
         event.Skip()
 
     def on_paint(self, event):
@@ -848,13 +838,29 @@ class Canvas3D(wxcanvas.GLCanvas):
             event.Skip()
             return
         self.SetCurrent(self.context)
+
+        if not hasattr(self, "_drag_initialised"):
+            self._drag_initialised = False
+
         if event.ButtonDown():
             self.last_mouse_x = event.GetX()
             self.last_mouse_y = event.GetY()
+            self._drag_initialised = True
             self.SetFocus()
+
+        if event.ButtonUp() or event.Leaving():
+            self._drag_initialised = False
+
         if event.Dragging():
+            if not getattr(self, "_drag_initialised", False):
+                self.last_mouse_x = event.GetX()
+                self.last_mouse_y = event.GetY()
+                self._drag_initialised = True
+                return
+
             dx = event.GetX() - self.last_mouse_x
             dy = event.GetY() - self.last_mouse_y
+
             if event.ShiftDown():
                 speed = self.camera_distance / 1000.0
                 yaw_rad = np.radians(self.camera_yaw)
@@ -866,9 +872,11 @@ class Canvas3D(wxcanvas.GLCanvas):
                 self.camera_yaw += dx * speed
                 self.camera_pitch += dy * speed
                 self.camera_pitch = max(-89.0, min(89.0, self.camera_pitch))
+
             self.last_mouse_x = event.GetX()
             self.last_mouse_y = event.GetY()
             self.init = False
+
         wheel = event.GetWheelRotation()
         if wheel != 0:
             hit = self.get_world_on_focal_plane(event.GetX(), event.GetY())
@@ -878,4 +886,5 @@ class Canvas3D(wxcanvas.GLCanvas):
                 self.focal_x = self.focal_x + (hit[0] - self.focal_x) * (1.0 - factor)
                 self.focal_y = self.focal_y + (hit[1] - self.focal_y) * (1.0 - factor)
             self.init = False
+
         self.Refresh()

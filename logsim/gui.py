@@ -13,7 +13,6 @@ import contextlib
 import csv
 import io
 import os
-import sys
 
 import wx
 import wx.glcanvas as wxcanvas
@@ -38,17 +37,6 @@ def initialise_glut_once():
         GLUT.glutInit()
         GLUT_INITIALISED = True
 
-
-if sys.platform == "win32":
-    import ctypes
-
-    try:
-        ctypes.windll.shcore.SetProcessDpiAwareness(1)
-    except Exception:
-        try:
-            ctypes.windll.user32.SetProcessDPIAware()
-        except Exception:
-            pass
 
 # Features implemented:
 # - Run the simulation for a user-specified number of cycles
@@ -565,21 +553,37 @@ class MyGLCanvas(wxcanvas.GLCanvas):
         origin, and schedules a redraw
 
         """
-        # Calculate object coordinates of the mouse position
         size = self.get_render_size()
         ox = (event.GetX() - self.pan_x) / self.zoom
         oy = (size.height - event.GetY() - self.pan_y) / self.zoom
         old_zoom = self.zoom
+
+        # 1. Track if the drag legitimately started inside this canvas
+        if not hasattr(self, "_drag_initialised"):
+            self._drag_initialised = False
+
         if event.ButtonDown():
             self.last_mouse_x = event.GetX()
             self.last_mouse_y = event.GetY()
+            self._drag_initialised = True  # A valid drag has started
+
+        if event.ButtonUp() or event.Leaving():
+            self._drag_initialised = False  # Reset when user lets go or leaves window
+
         if event.Dragging():
+            if not getattr(self, "_drag_initialised", False):
+                self.last_mouse_x = event.GetX()
+                self.last_mouse_y = event.GetY()
+                self._drag_initialised = True
+                return
+
             self.pan_x += event.GetX() - self.last_mouse_x
             self.pan_y -= event.GetY() - self.last_mouse_y
             self.last_mouse_x = event.GetX()
             self.last_mouse_y = event.GetY()
             self.limit_top_left_pan()
             self.init = False
+
         if event.GetWheelRotation() < 0:
             self.zoom *= 1.0 + (event.GetWheelRotation() / (20 * event.GetWheelDelta()))
             # Adjust pan so as to zoom around the mouse position
@@ -587,6 +591,7 @@ class MyGLCanvas(wxcanvas.GLCanvas):
             self.pan_y -= (self.zoom - old_zoom) * oy
             self.limit_top_left_pan()
             self.init = False
+
         if event.GetWheelRotation() > 0:
             self.zoom /= 1.0 - (event.GetWheelRotation() / (20 * event.GetWheelDelta()))
             # Adjust pan so as to zoom around the mouse position
@@ -594,6 +599,7 @@ class MyGLCanvas(wxcanvas.GLCanvas):
             self.pan_y -= (self.zoom - old_zoom) * oy
             self.limit_top_left_pan()
             self.init = False
+
         self.Refresh()  # triggers the paint event
 
     def limit_top_left_pan(self):
@@ -1192,9 +1198,7 @@ class Gui(wx.Frame):
         theme, and disables file-dependent controls when no circuit is loaded.
 
         """
-        super().__init__(parent=None, title=title)
-        scaled_size = self.FromDIP(wx.Size(1200, 750))
-        self.SetSize(scaled_size)
+        super().__init__(parent=None, title=title, size=(1200, 750))
         base_font = self.GetFont()
         base_font.SetPointSize(max(1, base_font.GetPointSize() - 1))
         self.SetFont(base_font)
@@ -1456,6 +1460,7 @@ class Gui(wx.Frame):
             wx.EVT_MENU, self.on_toggle_cycle_inspector, id=ID_TOGGLE_CYCLE_INSPECTOR
         )
         self.Bind(wx.EVT_MENU, self.on_toggle_3d, id=ID_TOGGLE_3D)
+        self.Bind(wx.EVT_MENU, self.on_toggle_multisample, id=ID_TOGGLE_MULTISAMPLE)
         self.Bind(wx.EVT_MENU, self.on_export_image, id=ID_EXPORT_IMAGE)
         self.Bind(wx.EVT_MENU, self.on_export_csv, id=ID_EXPORT_CSV)
         self.Bind(wx.EVT_MENU, self.on_zoom_in, id=ID_ZOOM_IN)
@@ -1674,9 +1679,12 @@ class Gui(wx.Frame):
             "Ctrl+I: Show or hide cycle inspector\n"
             "Ctrl+Shift+P: Export waveform as PNG\n"
             "Ctrl+Shift+E: Export traces as CSV\n"
-            "1 or F: Snap the 3D view to the front\n"
-            "2 or R: Reset the 3D camera to the default view\n"
+            "F: Snap the 3D view to the front\n"
+            "R: Reset the 3D camera to the default view\n"
             "B: Cycle the 3D trace background display mode\n"
+            "Drag: Orbit the 3D view\n"
+            "Shift+Drag: Pan the 3D view\n"
+            "Scroll: Zoom the 3D view\n"
             "Ctrl+1: Show Available Signals panel\n"
             "Ctrl+2: Show Simulation panel\n"
             "Ctrl+3: Show Switches panel\n"
