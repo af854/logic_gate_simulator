@@ -221,11 +221,12 @@ class Canvas3D(wxcanvas.GLCanvas):
     def set_multisample(self, enabled):
         """Enable or disable multisample antialiasing for the OpenGL context."""
         self.multisample_enabled = enabled
-        self.SetCurrent(self.context)
-        if enabled:
-            GL.glEnable(GL.GL_MULTISAMPLE)
-        else:
-            GL.glDisable(GL.GL_MULTISAMPLE)
+        if self.IsShownOnScreen():
+            self.SetCurrent(self.context)
+            if enabled:
+                GL.glEnable(GL.GL_MULTISAMPLE)
+            else:
+                GL.glDisable(GL.GL_MULTISAMPLE)
         self.Refresh()
 
     def categorise_signals(self):
@@ -707,7 +708,9 @@ class Canvas3D(wxcanvas.GLCanvas):
 
         This provides a balanced perspective of the 3D planes.
         """
-        self.SetCurrent(self.context)
+        if self.IsShownOnScreen():
+            self.SetCurrent(self.context)
+
         self.camera_pitch = 25.0
         self.camera_yaw = -35.0
         self._calculate_focal_and_zoom()
@@ -717,7 +720,9 @@ class Canvas3D(wxcanvas.GLCanvas):
 
         This shows the planes without perspective rotation.
         """
-        self.SetCurrent(self.context)
+        if self.IsShownOnScreen():
+            self.SetCurrent(self.context)
+
         self.camera_pitch = 0.0
         self.camera_yaw = 0.0
         self._calculate_focal_and_zoom()
