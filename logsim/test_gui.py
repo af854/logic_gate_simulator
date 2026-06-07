@@ -79,6 +79,7 @@ class DummyGui:
     on_reset_button = Gui.on_reset_button
     on_clear_traces = Gui.on_clear_traces
     on_clear_status = Gui.on_clear_status
+    on_reset_view = Gui.on_reset_view
 
     def show_status(self, message):
         """Store status messages so the tests can check them later"""

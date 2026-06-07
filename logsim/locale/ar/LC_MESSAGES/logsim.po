@@ -1,0 +1,419 @@
+msgid ""
+msgstr ""
+"Project-Id-Version: logsim\n"
+"POT-Creation-Date: 2026-06-07\n"
+"PO-Revision-Date: 2026-06-07\n"
+"Last-Translator: GF2 Team\n"
+"Language-Team: Arabic\n"
+"Language: ar\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+
+msgid "Logic Simulator"
+msgstr "محاكي المنطق"
+
+msgid "&Open...\tCtrl+O"
+msgstr "&فتح...\tCtrl+O"
+
+msgid "&Exit\tCtrl+Q"
+msgstr "&خروج\tCtrl+Q"
+
+msgid "&Quick start\tF1"
+msgstr "&بدء سريع\tF1"
+
+msgid "&Keyboard shortcuts"
+msgstr "&اختصارات لوحة المفاتيح"
+
+msgid "&Circuit file syntax"
+msgstr "&صيغة ملف الدائرة"
+
+msgid "External &documentation"
+msgstr "ال&توثيق الخارجي"
+
+msgid "&About"
+msgstr "&حول"
+
+msgid "Export as PNG\tCtrl+Shift+P"
+msgstr "تصدير كصورة PNG\tCtrl+Shift+P"
+
+msgid "Export as CSV\tCtrl+Shift+E"
+msgstr "تصدير كملف CSV\tCtrl+Shift+E"
+
+msgid "Zoom in\tCtrl+="
+msgstr "تكبير\tCtrl+="
+
+msgid "Zoom out\tCtrl+-"
+msgstr "تصغير\tCtrl+-"
+
+msgid "Reset view\tR"
+msgstr "إعادة ضبط العرض\tR"
+
+msgid "Show cycle inspector"
+msgstr "إظهار فاحص الدورات"
+
+msgid "Enable 3D view\tCtrl+D"
+msgstr "تفعيل العرض ثلاثي الأبعاد\tCtrl+D"
+
+msgid "Enable 3D anti-aliasing"
+msgstr "تفعيل تنعيم العرض ثلاثي الأبعاد"
+
+msgid "Switch to light mode\tCtrl+Shift+T"
+msgstr "التبديل إلى الوضع الفاتح\tCtrl+Shift+T"
+
+msgid "Switch to dark mode\tCtrl+Shift+T"
+msgstr "التبديل إلى الوضع الداكن\tCtrl+Shift+T"
+
+msgid "Switch to Arabic"
+msgstr "التبديل إلى العربية"
+
+msgid "Switch to English"
+msgstr "التبديل إلى الإنجليزية"
+
+msgid "Show Available Signals\tCtrl+1"
+msgstr "إظهار الإشارات المتاحة\tCtrl+1"
+
+msgid "Show Simulation\tCtrl+2"
+msgstr "إظهار المحاكاة\tCtrl+2"
+
+msgid "Show Switches\tCtrl+3"
+msgstr "إظهار المفاتيح\tCtrl+3"
+
+msgid "Show Console\tCtrl+4"
+msgstr "إظهار وحدة التحكم\tCtrl+4"
+
+msgid "&File"
+msgstr "&ملف"
+
+msgid "&View"
+msgstr "&عرض"
+
+msgid "&Window"
+msgstr "&نافذة"
+
+msgid "&Export"
+msgstr "&تصدير"
+
+msgid "&Help"
+msgstr "&مساعدة"
+
+msgid "Ready"
+msgstr "جاهز"
+
+msgid "Cycles to run"
+msgstr "عدد الدورات"
+
+msgid "Cycles passed: {count}"
+msgstr "{count}: الدورات المنفذة"
+
+msgid "Run cycles"
+msgstr "تشغيل الدورات"
+
+msgid "Reset simulation"
+msgstr "إعادة ضبط المحاكاة"
+
+msgid "Clear traces"
+msgstr "مسح المخططات"
+
+msgid "Clear console"
+msgstr "مسح وحدة التحكم"
+
+msgid "Cycle:"
+msgstr ":الدورة"
+
+msgid "Simulation"
+msgstr "المحاكاة"
+
+msgid "Switches"
+msgstr "المفاتيح"
+
+msgid "Available signals"
+msgstr "الإشارات المتاحة"
+
+msgid "Console"
+msgstr "وحدة التحكم"
+
+msgid ""
+"Logic Simulator\n"
+"\n"
+"A graphical logic circuit simulator for the GF2 Software project.\n"
+"\n"
+"Use it to load circuit definition files, run simulations cycle by cycle, toggle switch inputs, monitor output signals, and export waveform traces as PNG or CSV files.\n"
+"\n"
+"Language sample: العربية"
+msgstr ""
+"محاكي المنطق\n"
+"\n"
+".GF2 Software محاكي رسومي للدوائر المنطقية لمشروع"
+"\n"
+"استخدمه لتحميل ملفات تعريف الدوائر، وتشغيل المحاكاة دورة بدورة، وتغيير مداخل المفاتيح، ومراقبة إشارات الخرج، وتصدير المخططات كملفات PNG أو CSV.\n"
+"\n"
+"مثال لغوي: العربية"
+
+msgid "About Logsim"
+msgstr "Logsim حول"
+
+msgid "Quick Start"
+msgstr "بدء سريع"
+
+msgid "Keyboard Shortcuts"
+msgstr "اختصارات لوحة المفاتيح"
+
+msgid "Circuit File Syntax"
+msgstr "صيغة ملف الدائرة"
+
+msgid "Opened external documentation"
+msgstr "تم فتح التوثيق الخارجي"
+
+msgid "Error: could not open external documentation."
+msgstr ".خطأ: تعذر فتح التوثيق الخارجي"
+
+msgid "Error: number of cycles must be positive."
+msgstr ".خطأ: يجب أن يكون عدد الدورات موجبًا"
+
+msgid "Error: cannot run more than {max_cycles} cycles at once."
+msgstr ".خطأ: لا يمكن تشغيل أكثر من {max_cycles} دورة مرة واحدة"
+
+msgid "Error: network failed to reach a steady state."
+msgstr ".خطأ: فشلت الشبكة في الوصول إلى حالة مستقرة"
+
+msgid "You can run at most {max_cycles} cycles at a time."
+msgstr ".يمكنك تشغيل {max_cycles} دورة كحد أقصى في كل مرة"
+
+msgid "Maximum Cycles"
+msgstr "الحد الأقصى للدورات"
+
+msgid "Error: no circuit loaded. Use File > Open to load one."
+msgstr ".خطأ: لا توجد دائرة محملة. استخدم ملف > فتح لتحميل دائرة"
+
+msgid "No circuit loaded. Use File > Open to load one."
+msgstr ".لا توجد دائرة محملة. استخدم ملف > فتح لتحميل دائرة"
+
+msgid "Error: network is incomplete."
+msgstr ".خطأ: الشبكة غير مكتملة"
+
+msgid "Ran simulation for {cycles} cycles."
+msgstr ".تم تشغيل المحاكاة لمدة {cycles} دورة"
+
+msgid "Ran {cycles} cycles"
+msgstr "تم تشغيل {cycles} دورة"
+
+msgid "Ran simulation for 1 cycle."
+msgstr ".تم تشغيل المحاكاة لدورة واحدة"
+
+msgid "Ran 1 cycle"
+msgstr "تم تشغيل دورة واحدة"
+
+msgid "Started live tracing for {cycles} cycles."
+msgstr ".بدأ التتبع المباشر لمدة {cycles} دورة"
+
+msgid "Live tracing: {done}/{target} cycles"
+msgstr "التتبع المباشر: {done}/{target} دورة"
+
+msgid "Resumed live tracing with {remaining} cycles remaining."
+msgstr ".تم استئناف التتبع المباشر مع بقاء {remaining} دورة"
+
+msgid "Paused live tracing."
+msgstr ".تم إيقاف التتبع المباشر مؤقتًا"
+
+msgid "Live tracing paused"
+msgstr "التتبع المباشر متوقف مؤقتًا"
+
+msgid "Pause live"
+msgstr "إيقاف مباشر"
+
+msgid "Play live"
+msgstr "تشغيل مباشر"
+
+msgid "Live tracing speed: {speed}"
+msgstr "{speed} :سرعة التتبع المباشر"
+
+msgid "Live tracing stopped"
+msgstr "تم إيقاف التتبع المباشر"
+
+msgid "Completed live tracing for {cycles} cycles."
+msgstr ".اكتمل التتبع المباشر لمدة {cycles} دورة"
+
+msgid "Error: no simulation cycle to undo."
+msgstr ".خطأ: لا توجد دورة محاكاة للتراجع عنها"
+
+msgid "Undid 1 cycle."
+msgstr ".تم التراجع عن دورة واحدة"
+
+msgid "Error: no simulation cycle to redo."
+msgstr ".خطأ: لا توجد دورة محاكاة لإعادتها"
+
+msgid "Redid 1 cycle."
+msgstr ".تمت إعادة دورة واحدة"
+
+msgid "Switched to 3D view"
+msgstr "تم التبديل إلى العرض ثلاثي الأبعاد"
+
+msgid "Switched to 2D trace view"
+msgstr "تم التبديل إلى عرض المخططات ثنائي الأبعاد"
+
+msgid "3D antialiasing enabled"
+msgstr "تم تفعيل تنعيم العرض ثلاثي الأبعاد"
+
+msgid "3D antialiasing disabled"
+msgstr "تم تعطيل تنعيم العرض ثلاثي الأبعاد"
+
+msgid "Reset simulation."
+msgstr ".تمت إعادة ضبط المحاكاة"
+
+msgid "Cleared traces."
+msgstr ".تم مسح المخططات"
+
+msgid "Zoomed in"
+msgstr "تم التكبير"
+
+msgid "Zoomed out"
+msgstr "تم التصغير"
+
+
+msgid "Shown cycle inspector"
+msgstr "تم إظهار فاحص الدورات"
+
+msgid "Hidden cycle inspector"
+msgstr "تم إخفاء فاحص الدورات"
+
+msgid "Switched to {theme_name} mode."
+msgstr ".{theme_name} تم التبديل إلى وضع"
+
+msgid "Open circuit definition"
+msgstr "فتح تعريف دائرة"
+
+msgid "Circuit files (*.txt)|*.txt|All files (*.*)|*.*"
+msgstr "ملفات الدوائر (*.txt)|*.txt|كل الملفات (*.*)|*.*"
+
+msgid "Error: no monitors to export."
+msgstr ".خطأ: لا توجد مراقبات للتصدير"
+
+msgid "Error: Image export is only supported in 2D view."
+msgstr ".خطأ: تصدير الصورة مدعوم فقط في العرض ثنائي الأبعاد"
+
+msgid "Export waveform image"
+msgstr "تصدير صورة الموجة"
+
+msgid "PNG image (*.png)|*.png"
+msgstr "صورة PNG (*.png)|*.png"
+
+msgid "Exported waveform image to {file_path}."
+msgstr ".{file_path} تم تصدير صورة الموجة إلى"
+
+msgid "Error: could not export waveform image."
+msgstr ".خطأ: تعذر تصدير صورة الموجة"
+
+msgid "Error: no monitor traces to export."
+msgstr ".خطأ: لا توجد مخططات مراقبة للتصدير"
+
+msgid "Export monitor traces"
+msgstr "تصدير مخططات المراقبة"
+
+msgid "CSV file (*.csv)|*.csv"
+msgstr "ملف CSV (*.csv)|*.csv"
+
+msgid "Exported monitor traces to {file_path}."
+msgstr ".{file_path} تم تصدير مخططات المراقبة إلى"
+
+msgid "Error: could not export CSV: {error}."
+msgstr "{error} :.CSV خطأ: تعذر تصدير"
+
+msgid "Undo one cycle"
+msgstr "تراجع عن دورة واحدة"
+
+msgid "Redo one cycle"
+msgstr "إعادة دورة واحدة"
+
+msgid "Pause"
+msgstr "إيقاف"
+
+msgid "Play"
+msgstr "تشغيل"
+
+msgid "Pause live tracing"
+msgstr "إيقاف التتبع المباشر مؤقتًا"
+
+msgid "Start live tracing"
+msgstr "بدء التتبع المباشر"
+
+msgid "Close section"
+msgstr "إغلاق القسم"
+
+msgid "Could not load circuit file:\n{path}"
+msgstr "{path} :تعذر تحميل ملف الدائرة"
+
+msgid "Error: could not load {path}."
+msgstr ".{path} خطأ: تعذر تحميل"
+
+msgid "Invalid circuit file"
+msgstr "ملف دائرة غير صالح"
+
+msgid "Logic Simulator - {path}"
+msgstr "محاكي المنطق - {path}"
+
+msgid "Loaded {path}."
+msgstr ".{path} تم تحميل"
+
+msgid "No switches"
+msgstr "لا توجد مفاتيح"
+
+msgid "LOW"
+msgstr "منخفض"
+
+msgid "HIGH"
+msgstr "مرتفع"
+
+msgid "No monitorable signals"
+msgstr "لا توجد إشارات قابلة للمراقبة"
+
+msgid "Remove"
+msgstr "إزالة"
+
+msgid "Added monitor for {monitor_name}."
+msgstr ".{monitor_name}تمت إضافة مراقب لـ"
+
+msgid "Removed monitor for {monitor_name}."
+msgstr ".{monitor_name}تمت إزالة المراقب لـ"
+
+msgid "Error: could not remove monitor for {monitor_name}."
+msgstr ".{monitor_name}خطأ: تعذرت إزالة المراقب لـ"
+
+msgid "Error: unknown switch '{switch_name}'."
+msgstr ".'{switch_name}' خطأ: مفتاح غير معروف"
+
+msgid "Set switch {switch_name} to {switch_label}."
+msgstr ".{switch_label} تم ضبط المفتاح {switch_name} على"
+
+msgid "Error: could not set {switch_name}."
+msgstr ".{switch_name} خطأ: تعذر ضبط"
+
+msgid "Error: {signal_name} is not monitored."
+msgstr ".{signal_name} خطأ: لا تتم مراقبة"
+
+msgid "Error: enter a monitor name."
+msgstr ".خطأ: أدخل اسم مراقب"
+
+msgid "Error: unknown signal '{monitor_name}'."
+msgstr ".'{monitor_name}' خطأ: إشارة غير معروفة"
+
+msgid "Error: could not add monitor for {monitor_name}. {reason}."
+msgstr ".{reason} .{monitor_name}خطأ: تعذرت إضافة مراقب لـ"
+
+msgid "signal is not an output"
+msgstr "الإشارة ليست خرجًا"
+
+msgid "signal is already monitored"
+msgstr "الإشارة تتم مراقبتها بالفعل"
+
+msgid "device does not exist"
+msgstr "الجهاز غير موجود"
+
+msgid "unknown monitor error"
+msgstr "خطأ مراقبة غير معروف"
+
+msgid "Add"
+msgstr "إضافة"
+
+msgid "No active monitors"
+msgstr "لا توجد مراقبات نشطة"

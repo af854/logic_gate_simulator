@@ -12,6 +12,7 @@ Graphical user interface: logsim.py <file path>
 Blank graphical user interface: logsim.py
 """
 import getopt
+import os
 import sys
 
 import wx
@@ -24,6 +25,23 @@ from scanner import Scanner
 from parse import Parser
 from userint import UserInterface
 from gui import Gui
+
+
+def initialise_locale(app):
+    """Initialise wx translations for the GUI and keep the locale alive."""
+    if os.environ.get("LANG", "").lower().replace("-", "_").startswith("ar"):
+        language = wx.LANGUAGE_ARABIC
+        app.language_code = "ar"
+    else:
+        language = wx.LANGUAGE_ENGLISH
+        app.language_code = "en"
+
+    locale = wx.Locale()
+    locale.Init(language)
+    locale_dir = os.path.join(os.path.dirname(__file__), "locale")
+    locale.AddCatalogLookupPathPrefix(locale_dir)
+    locale.AddCatalog("logsim")
+    app.locale = locale
 
 
 def main(arg_list):
@@ -75,6 +93,7 @@ def main(arg_list):
 
         # Small change by Arwa to allow the gui to open without a file path argument (it'll show a status message in that case)
         app = wx.App()
+        initialise_locale(app)
         if len(arguments) == 1:
             [path] = arguments
             scanner = Scanner(path, names)
@@ -89,7 +108,9 @@ def main(arg_list):
         else:
             gui = Gui("Logic Simulator", None, names, devices, network,
                       monitors, {})
-            gui.show_status("No circuit loaded. Use File > Open to load one.")
+            gui.show_status(
+                wx.GetTranslation("No circuit loaded. Use File > Open to load one.")
+            )
 
         gui.Show(True)
         app.MainLoop()
