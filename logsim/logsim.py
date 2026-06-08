@@ -24,24 +24,30 @@ from monitors import Monitors
 from scanner import Scanner
 from parse import Parser
 from userint import UserInterface
-from gui import Gui
+from gui import Gui, set_gui_language
 
 
-def initialise_locale(app):
+def get_start_language():
+    """Return the GUI language to use when the program starts."""
+    environment_language = os.environ.get("LANG", "").lower().replace("-", "_")
+    if environment_language.startswith("ar"):
+        return "ar"
+    if environment_language.startswith("en"):
+        return "en"
+
+    system_language = wx.Locale.GetSystemLanguage()
+    language_info = wx.Locale.GetLanguageInfo(system_language)
+    if language_info is not None:
+        system_language_name = language_info.CanonicalName.lower()
+        if system_language_name.startswith("ar"):
+            return "ar"
+
+    return "en"
+
+
+def initialise_locale():
     """Initialise wx translations for the GUI and keep the locale alive."""
-    if os.environ.get("LANG", "").lower().replace("-", "_").startswith("ar"):
-        language = wx.LANGUAGE_ARABIC
-        app.language_code = "ar"
-    else:
-        language = wx.LANGUAGE_ENGLISH
-        app.language_code = "en"
-
-    locale = wx.Locale()
-    locale.Init(language)
-    locale_dir = os.path.join(os.path.dirname(__file__), "locale")
-    locale.AddCatalogLookupPathPrefix(locale_dir)
-    locale.AddCatalog("logsim")
-    app.locale = locale
+    set_gui_language(get_start_language())
 
 
 def main(arg_list):
@@ -93,7 +99,7 @@ def main(arg_list):
 
         # Small change by Arwa to allow the gui to open without a file path argument (it'll show a status message in that case)
         app = wx.App()
-        initialise_locale(app)
+        initialise_locale()
         if len(arguments) == 1:
             [path] = arguments
             scanner = Scanner(path, names)

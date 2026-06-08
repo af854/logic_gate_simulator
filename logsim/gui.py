@@ -26,7 +26,13 @@ from OpenGL import GL, GLUT
 from parse import Parser
 from scanner import Scanner
 
-_ = wx.GetTranslation
+
+def _(message):
+    """Translate GUI text unless English is selected."""
+    app = wx.GetApp()
+    if app is not None and getattr(app, "language_code", "en") == "en":
+        return message
+    return wx.GetTranslation(message)
 
 
 def tr(message, **values):
@@ -36,12 +42,12 @@ def tr(message, **values):
 
 def set_gui_language(language_code):
     """Switch wx translations for this process between English and Arabic."""
-    if language_code == "ar":
-        os.environ["LANG"] = "ar"
-        language = wx.LANGUAGE_ARABIC
-    else:
+    if language_code == "en":
         os.environ["LANG"] = "en"
         language = wx.LANGUAGE_ENGLISH
+    else:
+        os.environ["LANG"] = "ar"
+        language = wx.LANGUAGE_ARABIC
 
     locale = wx.Locale()
     locale.Init(language)
@@ -1361,14 +1367,17 @@ class Gui(wx.Frame):
             ),
         }
 
-        menu_bar.Append(file_menu, _("&File"))
-        menu_bar.Append(view_menu, _("&View"))
-        menu_bar.Append(window_menu, _("&Window"))
-        menu_bar.Append(export_menu, _("&Export"))
-        menu_bar.Append(help_menu, _("&Help"))
-
         self.menu_bar = menu_bar
+        self.menu_bar_menus = [
+            ("file", file_menu, "&File"),
+            ("view", view_menu, "&View"),
+            ("window", window_menu, "&Window"),
+            ("export", export_menu, "&Export"),
+            ("help", help_menu, "&Help"),
+        ]
+        self.update_menu_bar_order()
         self.SetMenuBar(menu_bar)
+        self.update_menu_bar_order()
         self.CreateStatusBar()
         self.SetStatusText(_("Ready"))
 
@@ -1404,7 +1413,8 @@ class Gui(wx.Frame):
         self.clear_traces_button = wx.Button(self, wx.ID_ANY, _("Clear traces"))
         self.live_trace_timer = wx.Timer(self)
         self.cycles_completed_text.SetMinSize((CYCLES_COMPLETED_WIDTH, -1))
-        self.cycles_completed_text.SetMaxSize((CYCLES_COMPLETED_WIDTH, -1))
+        self.align_static_text(self.text)
+        self.align_static_text(self.cycles_completed_text)
         self.run_cycles_button.SetMinSize(
             (SIMULATION_CONTROL_WIDTH, COMMAND_BUTTON_HEIGHT)
         )
@@ -1506,7 +1516,7 @@ class Gui(wx.Frame):
         self.monitor_rows_sizer = wx.BoxSizer(wx.VERTICAL)
         self.monitor_rows.SetSizer(self.monitor_rows_sizer)
         self.monitor_button_keys = {}
-  
+
         # The separate active monitors panel is hidden because the available
         # signal list now shows add or remove next to each signal
         self.monitor_rows.Hide()
@@ -1597,7 +1607,9 @@ class Gui(wx.Frame):
         self.section_panels = {}
         self.section_titles = {}
         self.section_close_buttons = {}
-
+        self.section_header_sizers = {}
+        self.section_visible = {}
+        self.side_splitter_windows = {}
         self.side_splitter = wx.SplitterWindow(
             self, style=wx.SP_LIVE_UPDATE | wx.SP_NOBORDER
         )
@@ -1606,14 +1618,23 @@ class Gui(wx.Frame):
         simulation_panel, simulation_sizer = self.create_section_panel(
             _("Simulation"), "simulation"
         )
-        simulation_panel.Reparent(self.side_splitter)
+        simulation_holder = wx.Panel(self.side_splitter, wx.ID_ANY)
+        simulation_holder.SetBackgroundColour(self.theme["frame_bg"])
+        simulation_holder_sizer = wx.BoxSizer(wx.VERTICAL)
+        simulation_panel.Reparent(simulation_holder)
+        simulation_holder_sizer.Add(simulation_panel, 1, wx.EXPAND | wx.BOTTOM, 4)
+        simulation_holder.SetSizer(simulation_holder_sizer)
+        self.side_splitter_windows["simulation"] = simulation_holder
         simulation_panel.SetMinSize((SIMULATION_PANEL_WIDTH, SIMULATION_PANEL_HEIGHT))
+        simulation_holder.SetMinSize((SIMULATION_PANEL_WIDTH, SIMULATION_PANEL_HEIGHT))
 
         self.spin = wx.SpinCtrl(simulation_panel, wx.ID_ANY, "10")
         self.spin.SetRange(1, MAX_RUN_CYCLES)
         self.spin.SetMinSize((CYCLE_SPIN_WIDTH, -1))
         self.spin.Bind(wx.EVT_TEXT, self.on_cycle_spin_text)
-        cycles_input_sizer = wx.BoxSizer(wx.HORIZONTAL)
+        self.cycles_input_sizer = wx.BoxSizer(wx.HORIZONTAL)
+        self.cycles_to_run_sizer = wx.BoxSizer(wx.HORIZONTAL)
+        self.cycles_completed_sizer = wx.BoxSizer(wx.HORIZONTAL)
         self.text.Reparent(simulation_panel)
         self.cycles_completed_text.Reparent(simulation_panel)
         self.run_cycles_button.Reparent(simulation_panel)
@@ -1621,15 +1642,17 @@ class Gui(wx.Frame):
         self.live_trace_speed_button.Reparent(simulation_panel)
         self.reset_button.Reparent(simulation_panel)
         self.clear_traces_button.Reparent(simulation_panel)
-        simulation_sizer.Add(self.text, 0, wx.LEFT | wx.RIGHT | wx.TOP, 6)
-        cycles_input_sizer.Add(self.spin, 1, wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, 6)
-        cycles_input_sizer.Add(self.live_trace_button, 0, wx.ALIGN_CENTER_VERTICAL)
-        cycles_input_sizer.Add(
-            self.live_trace_speed_button, 0, wx.ALIGN_CENTER_VERTICAL
-        )
-        simulation_sizer.Add(cycles_input_sizer, 0, wx.EXPAND | wx.ALL, 6)
+        self.set_simulation_label_order()
+        self.set_simulation_control_order()
         simulation_sizer.Add(
-            self.cycles_completed_text, 0, wx.LEFT | wx.RIGHT | wx.BOTTOM, 6
+            self.cycles_to_run_sizer, 0, wx.EXPAND | wx.LEFT | wx.RIGHT | wx.TOP, 6
+        )
+        simulation_sizer.Add(self.cycles_input_sizer, 0, wx.EXPAND | wx.ALL, 6)
+        simulation_sizer.Add(
+            self.cycles_completed_sizer,
+            0,
+            wx.EXPAND | wx.LEFT | wx.RIGHT | wx.BOTTOM,
+            6,
         )
         simulation_sizer.Add(self.run_cycles_button, 0, wx.EXPAND | wx.ALL, 6)
         simulation_sizer.Add(self.reset_button, 0, wx.EXPAND | wx.ALL, 6)
@@ -1638,16 +1661,24 @@ class Gui(wx.Frame):
         switch_panel, switch_sizer = self.create_section_panel(
             _("Switches"), "switches"
         )
-        switch_panel.Reparent(self.side_splitter)
+        switch_holder = wx.Panel(self.side_splitter, wx.ID_ANY)
+        switch_holder.SetBackgroundColour(self.theme["frame_bg"])
+        switch_holder_sizer = wx.BoxSizer(wx.VERTICAL)
+        switch_panel.Reparent(switch_holder)
+        switch_holder_sizer.Add(switch_panel, 1, wx.EXPAND | wx.TOP, 4)
+        switch_holder.SetSizer(switch_holder_sizer)
+        self.side_splitter_windows["switches"] = switch_holder
         switch_panel.SetMinSize((SIDE_PANEL_WIDTH, 230))
+        switch_holder.SetMinSize((SIDE_PANEL_WIDTH, 230))
         self.switch_rows.Reparent(switch_panel)
         switch_sizer.Add(self.switch_rows, 1, wx.EXPAND | wx.ALL, 6)
 
         self.side_splitter.SplitHorizontally(
-            simulation_panel, switch_panel, sashPosition=250
+            simulation_holder, switch_holder, sashPosition=250
         )
         self.side_splitter.SetMinimumPaneSize(SIMULATION_PANEL_HEIGHT)
         self.side_splitter.SetSashGravity(0.0)
+        self.apply_splitter_style()
 
         signal_panel, signal_sizer = self.create_section_panel(
             _("Available signals"), "available_signals"
@@ -1661,19 +1692,10 @@ class Gui(wx.Frame):
         self.console_box.Reparent(console_panel)
         console_sizer.Add(self.console_box, 1, wx.EXPAND | wx.ALL, 6)
 
-        inspector_sizer = wx.BoxSizer(wx.HORIZONTAL)
-        inspector_sizer.Add(
-            self.cycle_inspector_label, 0, wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, 4
-        )
-        inspector_sizer.Add(
-            self.cycle_inspector_entry,
-            0,
-            wx.ALIGN_CENTER_VERTICAL | wx.RIGHT | wx.FIXED_MINSIZE,
-            8,
-        )
+        self.inspector_sizer = wx.BoxSizer(wx.HORIZONTAL)
         self.cycle_inspector_slider.SetMinSize((120, -1))
-        inspector_sizer.Add(self.cycle_inspector_slider, 1, wx.EXPAND)
-        self.cycle_inspector_panel.SetSizer(inspector_sizer)
+        self.set_cycle_inspector_order()
+        self.cycle_inspector_panel.SetSizer(self.inspector_sizer)
 
         # Add both canvases to the layout
         canvas_sizer.Add(self.canvas_2d, 1, wx.EXPAND)
@@ -1704,6 +1726,7 @@ class Gui(wx.Frame):
         root_sizer.Add(console_panel, 0, wx.EXPAND | wx.LEFT | wx.RIGHT | wx.BOTTOM, 8)
 
         self.SetSizer(root_sizer)
+        self.update_layout_direction()
         self.SetMinSize((MIN_FRAME_WIDTH, MIN_FRAME_HEIGHT))
         self.update_switch_rows()
         self.update_module_signal_rows()
@@ -2229,9 +2252,7 @@ class Gui(wx.Frame):
         self.live_trace_timer.Start(self.get_live_trace_interval_ms())
         self.update_live_trace_button()
         self.show_status(tr("Started live tracing for {cycles} cycles.", cycles=cycles))
-        self.SetStatusText(
-            tr("Live tracing: {done}/{target} cycles", done=0, target=cycles)
-        )
+        self.update_live_trace_status_text()
         return True
 
     def resume_live_trace(self):
@@ -2268,13 +2289,7 @@ class Gui(wx.Frame):
                 remaining=remaining_cycles,
             )
         )
-        self.SetStatusText(
-            tr(
-                "Live tracing: {done}/{target} cycles",
-                done=self.live_trace_cycles_completed,
-                target=self.live_trace_target_cycles,
-            )
-        )
+        self.update_live_trace_status_text()
         return True
 
     def stop_live_trace(self, show_message=False, keep_paused=False):
@@ -2341,6 +2356,19 @@ class Gui(wx.Frame):
         if hasattr(self, "apply_live_trace_speed_button_theme"):
             self.apply_live_trace_speed_button_theme()
 
+    def update_live_trace_status_text(self):
+        """Refresh the status bar text shown during live tracing."""
+        if self.live_trace_running:
+            self.SetStatusText(
+                tr(
+                    "Live tracing: {done}/{target} cycles",
+                    done=self.live_trace_cycles_completed,
+                    target=self.live_trace_target_cycles,
+                )
+            )
+        elif self.live_trace_paused:
+            self.SetStatusText(_("Live tracing paused"))
+
     def on_live_trace_timer(self, event):
         """Advance live tracing by one cycle when the wx timer fires."""
         if not self.network.check_network():
@@ -2354,13 +2382,7 @@ class Gui(wx.Frame):
             return
 
         self.live_trace_cycles_completed += 1
-        self.SetStatusText(
-            tr(
-                "Live tracing: {done}/{target} cycles",
-                done=self.live_trace_cycles_completed,
-                target=self.live_trace_target_cycles,
-            )
-        )
+        self.update_live_trace_status_text()
         if hasattr(get_active_canvas(self), "follow_latest_cycle"):
             get_active_canvas(self).follow_latest_cycle()
         get_active_canvas(self).render()
@@ -2619,6 +2641,12 @@ class Gui(wx.Frame):
         self.clear_status_button.SetLabel(_("Clear console"))
         self.cycle_inspector_label.SetLabel(_("Cycle:"))
         self.update_cycles_completed_text()
+        self.update_layout_direction()
+        self.align_static_text(self.text)
+        self.align_static_text(self.cycles_completed_text)
+        self.set_simulation_label_order()
+        self.set_simulation_control_order()
+        self.set_cycle_inspector_order()
 
         section_labels = {
             "simulation": _("Simulation"),
@@ -2629,62 +2657,254 @@ class Gui(wx.Frame):
         for section_name, label in section_labels.items():
             if section_name in self.section_titles:
                 self.section_titles[section_name].SetLabel(label)
+                self.set_section_header_order(
+                    section_name,
+                    self.section_header_sizers[section_name],
+                    self.section_titles[section_name],
+                    self.section_close_buttons[section_name],
+                )
 
-        if self.theme_name == "dark":
-            self.theme_menu_item.SetItemLabel(_("Switch to light mode\tCtrl+Shift+T"))
-        else:
-            self.theme_menu_item.SetItemLabel(_("Switch to dark mode\tCtrl+Shift+T"))
-        self.language_menu_item.SetItemLabel(self.get_language_menu_label())
-        self.cycle_inspector_menu_item.SetItemLabel(_("Show cycle inspector"))
-        self.view_3d_menu_item.SetItemLabel(_("Enable 3D view\tCtrl+D"))
-        self.view_aa_menu_item.SetItemLabel(_("Enable 3D anti-aliasing"))
-
-        self.window_menu_items["available_signals"].SetItemLabel(
-            _("Show Available Signals\tCtrl+1")
-        )
-        self.window_menu_items["simulation"].SetItemLabel(_("Show Simulation\tCtrl+2"))
-        self.window_menu_items["switches"].SetItemLabel(_("Show Switches\tCtrl+3"))
-        self.window_menu_items["console"].SetItemLabel(_("Show Console\tCtrl+4"))
-
-        menu_labels = [_("&File"), _("&View"), _("&Window"), _("&Export"), _("&Help")]
-        for menu_number, menu_label in enumerate(menu_labels):
-            if hasattr(self.menu_bar, "SetMenuLabel"):
-                self.menu_bar.SetMenuLabel(menu_number, menu_label)
-            if hasattr(self.menu_bar, "SetLabelTop"):
-                self.menu_bar.SetLabelTop(menu_number, menu_label)
-
-        self.file_menu_items["open"].SetItemLabel(_("&Open...\tCtrl+O"))
-        self.file_menu_items["exit"].SetItemLabel(_("&Exit\tCtrl+Q"))
-        self.export_menu_items["image"].SetItemLabel(_("Export as PNG\tCtrl+Shift+P"))
-        self.export_menu_items["csv"].SetItemLabel(_("Export as CSV\tCtrl+Shift+E"))
-        self.view_menu_items["zoom_in"].SetItemLabel(_("Zoom in\tCtrl+="))
-        self.view_menu_items["zoom_out"].SetItemLabel(_("Zoom out\tCtrl+-"))
-        self.view_menu_items["reset_view"].SetItemLabel(_("Reset view\tR"))
-        self.help_menu_items["quick_start"].SetItemLabel(_("&Quick start\tF1"))
-        self.help_menu_items["shortcuts"].SetItemLabel(_("&Keyboard shortcuts"))
-        self.help_menu_items["syntax"].SetItemLabel(_("&Circuit file syntax"))
-        self.help_menu_items["external_docs"].SetItemLabel(_("External &documentation"))
-        self.help_menu_items["about"].SetItemLabel(_("&About"))
+        self.rebuild_menu_bar()
 
         self.update_live_trace_button()
         self.update_live_trace_speed_button()
+        self.update_live_trace_status_text()
         self.update_switch_rows()
         self.update_module_signal_rows()
         self.update_monitor_rows()
         self.Layout()
         self.Refresh()
+        self.Update()
+
+    def rebuild_menu_bar(self):
+        """Recreate the menu bar using the current language.
+
+        Changing wx menu labels in place can crash some Windows wxPython builds.
+        Rebuilding the menu avoids that and keeps the language switch reliable.
+        """
+        file_menu = wx.Menu()
+        export_menu = wx.Menu()
+        view_menu = wx.Menu()
+        window_menu = wx.Menu()
+        help_menu = wx.Menu()
+        menu_bar = wx.MenuBar()
+
+        self.file_menu_items = {}
+        self.export_menu_items = {}
+        self.view_menu_items = {}
+        self.help_menu_items = {}
+
+        self.file_menu_items["open"] = file_menu.Append(
+            ID_OPEN_FILE, _("&Open...\tCtrl+O")
+        )
+        file_menu.AppendSeparator()
+        self.file_menu_items["exit"] = file_menu.Append(wx.ID_EXIT, _("&Exit\tCtrl+Q"))
+
+        self.view_menu_items["zoom_in"] = view_menu.Append(
+            ID_ZOOM_IN, _("Zoom in\tCtrl+=")
+        )
+        self.view_menu_items["zoom_out"] = view_menu.Append(
+            ID_ZOOM_OUT, _("Zoom out\tCtrl+-")
+        )
+        self.view_menu_items["reset_view"] = view_menu.Append(
+            ID_RESET_VIEW, _("Reset view\tR")
+        )
+        view_menu.AppendSeparator()
+
+        self.cycle_inspector_menu_item = view_menu.AppendCheckItem(
+            ID_TOGGLE_CYCLE_INSPECTOR, _("Show cycle inspector")
+        )
+        self.cycle_inspector_menu_item.Check(self.cycle_inspector_panel.IsShown())
+        self.view_3d_menu_item = view_menu.AppendCheckItem(
+            ID_TOGGLE_3D, _("Enable 3D view\tCtrl+D")
+        )
+        self.view_3d_menu_item.Check(self.canvas_3d.IsShown())
+        self.view_aa_menu_item = view_menu.AppendCheckItem(
+            ID_TOGGLE_MULTISAMPLE, _("Enable 3D anti-aliasing")
+        )
+        if hasattr(self.canvas_3d, "multisample_enabled"):
+            self.view_aa_menu_item.Check(self.canvas_3d.multisample_enabled)
+        else:
+            self.view_aa_menu_item.Check(True)
+        view_menu.AppendSeparator()
+
+        if self.theme_name == "dark":
+            theme_label = _("Switch to light mode\tCtrl+Shift+T")
+        else:
+            theme_label = _("Switch to dark mode\tCtrl+Shift+T")
+        self.theme_menu_item = view_menu.Append(ID_TOGGLE_THEME, theme_label)
+        self.language_menu_item = view_menu.Append(
+            ID_TOGGLE_LANGUAGE, self.get_language_menu_label()
+        )
+
+        self.window_menu_items = {
+            "available_signals": window_menu.AppendCheckItem(
+                ID_SHOW_AVAILABLE_SIGNALS, _("Show Available Signals\tCtrl+1")
+            ),
+            "simulation": window_menu.AppendCheckItem(
+                ID_SHOW_SIMULATION, _("Show Simulation\tCtrl+2")
+            ),
+            "switches": window_menu.AppendCheckItem(
+                ID_SHOW_SWITCHES, _("Show Switches\tCtrl+3")
+            ),
+            "console": window_menu.AppendCheckItem(
+                ID_SHOW_CONSOLE, _("Show Console\tCtrl+4")
+            ),
+        }
+        self.update_section_window_menu()
+
+        self.export_menu_items["image"] = export_menu.Append(
+            ID_EXPORT_IMAGE, _("Export as PNG\tCtrl+Shift+P")
+        )
+        self.export_menu_items["csv"] = export_menu.Append(
+            ID_EXPORT_CSV, _("Export as CSV\tCtrl+Shift+E")
+        )
+
+        self.help_menu_items["quick_start"] = help_menu.Append(
+            ID_HELP, _("&Quick start\tF1")
+        )
+        self.help_menu_items["shortcuts"] = help_menu.Append(
+            ID_HELP_SHORTCUTS, _("&Keyboard shortcuts")
+        )
+        self.help_menu_items["syntax"] = help_menu.Append(
+            ID_HELP_SYNTAX, _("&Circuit file syntax")
+        )
+        help_menu.AppendSeparator()
+        self.help_menu_items["external_docs"] = help_menu.Append(
+            ID_HELP_EXTERNAL_DOCS, _("External &documentation")
+        )
+        help_menu.AppendSeparator()
+        self.help_menu_items["about"] = help_menu.Append(wx.ID_ABOUT, _("&About"))
+
+        self.menu_bar = menu_bar
+        self.menu_bar_menus = [
+            ("file", file_menu, "&File"),
+            ("view", view_menu, "&View"),
+            ("window", window_menu, "&Window"),
+            ("export", export_menu, "&Export"),
+            ("help", help_menu, "&Help"),
+        ]
+        self.update_menu_bar_order()
+        self.SetMenuBar(menu_bar)
+        if hasattr(self, "theme"):
+            self.menu_bar.SetBackgroundColour(self.theme["frame_bg"])
+            self.menu_bar.SetForegroundColour(self.theme["text"])
+
+    def update_menu_bar_order(self):
+        """Refresh the translated top menu labels."""
+        menu_order = self.menu_bar_menus
+        while self.menu_bar.GetMenuCount() > 0:
+            self.menu_bar.Remove(0)
+
+        for _menu_name, menu, label in menu_order:
+            self.menu_bar.Append(menu, _(label))
+
+    def update_layout_direction(self):
+        """Use wx's native layout direction for English or Arabic."""
+        if self.language_code == "ar":
+            self.SetLayoutDirection(wx.Layout_RightToLeft)
+        else:
+            self.SetLayoutDirection(wx.Layout_LeftToRight)
+
+    def align_static_text(self, label):
+        """Align a simple text label for the current language."""
+        style = label.GetWindowStyleFlag()
+        style &= ~(wx.ALIGN_LEFT | wx.ALIGN_RIGHT | wx.ALIGN_CENTRE_HORIZONTAL)
+        if self.language_code == "ar":
+            style |= wx.ALIGN_RIGHT
+        else:
+            style |= wx.ALIGN_LEFT
+        label.SetWindowStyleFlag(style)
+
+    def set_simulation_label_order(self):
+        """Place Simulation text labels on the correct side."""
+        if not hasattr(self, "cycles_to_run_sizer"):
+            return
+
+        label_rows = (
+            (self.cycles_to_run_sizer, self.text),
+            (self.cycles_completed_sizer, self.cycles_completed_text),
+        )
+        for row_sizer, label in label_rows:
+            row_sizer.Clear(delete_windows=False)
+            if self.language_code == "ar":
+                row_sizer.AddStretchSpacer(1)
+                row_sizer.Add(label, 0, wx.ALIGN_CENTER_VERTICAL)
+            else:
+                row_sizer.Add(label, 0, wx.ALIGN_CENTER_VERTICAL)
+                row_sizer.AddStretchSpacer(1)
+            row_sizer.Layout()
+
+    def set_simulation_control_order(self):
+        """Place the cycle input and live controls for the current language."""
+        if not hasattr(self, "cycles_input_sizer"):
+            return
+
+        self.cycles_input_sizer.Clear(delete_windows=False)
+        if self.language_code == "ar":
+            self.cycles_input_sizer.Add(
+                self.live_trace_speed_button, 0, wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, 6
+            )
+            self.cycles_input_sizer.Add(
+                self.live_trace_button, 0, wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, 6
+            )
+            self.cycles_input_sizer.Add(self.spin, 1, wx.ALIGN_CENTER_VERTICAL)
+        else:
+            self.cycles_input_sizer.Add(
+                self.spin, 1, wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, 6
+            )
+            self.cycles_input_sizer.Add(
+                self.live_trace_button, 0, wx.ALIGN_CENTER_VERTICAL
+            )
+            self.cycles_input_sizer.Add(
+                self.live_trace_speed_button, 0, wx.ALIGN_CENTER_VERTICAL
+            )
+        self.cycles_input_sizer.Layout()
+
+    def set_cycle_inspector_order(self):
+        """Place the cycle inspector controls for the current language."""
+        if not hasattr(self, "inspector_sizer"):
+            return
+
+        self.inspector_sizer.Clear(delete_windows=False)
+        if self.language_code == "ar":
+            self.inspector_sizer.Add(
+                self.cycle_inspector_slider, 1, wx.EXPAND | wx.LEFT, 8
+            )
+            self.inspector_sizer.Add(
+                self.cycle_inspector_entry,
+                0,
+                wx.ALIGN_CENTER_VERTICAL | wx.LEFT | wx.FIXED_MINSIZE,
+                4,
+            )
+            self.inspector_sizer.Add(
+                self.cycle_inspector_label, 0, wx.ALIGN_CENTER_VERTICAL
+            )
+        else:
+            self.inspector_sizer.Add(
+                self.cycle_inspector_label,
+                0,
+                wx.ALIGN_CENTER_VERTICAL | wx.RIGHT,
+                4,
+            )
+            self.inspector_sizer.Add(
+                self.cycle_inspector_entry,
+                0,
+                wx.ALIGN_CENTER_VERTICAL | wx.RIGHT | wx.FIXED_MINSIZE,
+                8,
+            )
+            self.inspector_sizer.Add(self.cycle_inspector_slider, 1, wx.EXPAND)
+        self.inspector_sizer.Layout()
 
     def on_close_section(self, event):
         """Hide the section whose close button was clicked."""
         section_name = event.GetEventObject().GetName()
         panel = self.section_panels[section_name]
+        self.section_visible[section_name] = False
 
         # If the panel is inside the splitter, unsplit it safely
         if section_name in ["simulation", "switches"]:
-            if self.side_splitter.IsSplit():
-                self.side_splitter.Unsplit(panel)
-            else:
-                self.side_splitter.Hide()  # Hide the whole splitter if the last pane is closed
+            self.update_side_splitter_panels()
         else:
             panel.Hide()
 
@@ -2705,32 +2925,11 @@ class Gui(wx.Frame):
 
         panel = self.section_panels[section_name]
         is_showing = event.IsChecked()
+        self.section_visible[section_name] = is_showing
 
         # Handle splitter panels
         if section_name in ["simulation", "switches"]:
-            if is_showing:
-                self.side_splitter.Show()
-                other_name = (
-                    "switches" if section_name == "simulation" else "simulation"
-                )
-                other_panel = self.section_panels[other_name]
-
-                if other_panel.IsShown():
-                    # Both panels are visible, split them
-                    if not self.side_splitter.IsSplit():
-                        self.side_splitter.SplitHorizontally(
-                            self.section_panels["simulation"],
-                            self.section_panels["switches"],
-                            sashPosition=250,
-                        )
-                else:
-                    # Only one panel is visible, initialize it full-size
-                    self.side_splitter.Initialize(panel)
-            else:
-                if self.side_splitter.IsSplit():
-                    self.side_splitter.Unsplit(panel)
-                else:
-                    self.side_splitter.Hide()
+            self.update_side_splitter_panels()
         # Handle standard panels
         else:
             panel.Show(is_showing)
@@ -2826,36 +3025,106 @@ class Gui(wx.Frame):
         """
         panel = wx.Panel(self, wx.ID_ANY, style=wx.BORDER_SIMPLE)
         panel_sizer = wx.BoxSizer(wx.VERTICAL)
+        header_panel = wx.Panel(panel, wx.ID_ANY)
         header_sizer = wx.BoxSizer(wx.HORIZONTAL)
         body_sizer = wx.BoxSizer(wx.VERTICAL)
 
-        title_label = wx.StaticText(panel, wx.ID_ANY, title)
+        title_label = wx.StaticText(header_panel, wx.ID_ANY, title)
         close_button = wxbuttons.GenBitmapButton(
-            panel, wx.ID_ANY, wx.Bitmap(1, 1), size=(30, 26)
+            header_panel, wx.ID_ANY, wx.Bitmap(1, 1), size=(30, 26)
         )
         close_button.SetMinSize((30, 26))
         close_button.SetName(section_name)
         close_button.Bind(wx.EVT_BUTTON, self.on_close_section)
 
-        header_sizer.Add(title_label, 1, wx.ALIGN_CENTER_VERTICAL | wx.LEFT, 6)
         if section_name == "console":
-            self.clear_status_button.Reparent(panel)
-            header_sizer.Add(self.clear_status_button, 0, wx.RIGHT | wx.TOP, 4)
-        header_sizer.Add(close_button, 0, wx.RIGHT | wx.TOP, 4)
-        panel_sizer.Add(header_sizer, 0, wx.EXPAND)
+            self.clear_status_button.Reparent(header_panel)
+        self.set_section_header_order(
+            section_name, header_sizer, title_label, close_button
+        )
+        header_panel.SetSizer(header_sizer)
+        panel_sizer.Add(header_panel, 0, wx.EXPAND)
         panel_sizer.Add(body_sizer, 1, wx.EXPAND)
         panel.SetSizer(panel_sizer)
 
         self.section_panels[section_name] = panel
         self.section_titles[section_name] = title_label
         self.section_close_buttons[section_name] = close_button
+        self.section_header_sizers[section_name] = header_sizer
+        self.section_visible[section_name] = True
         self.apply_close_button_theme(close_button)
         return panel, body_sizer
+
+    def set_section_header_order(
+        self, section_name, header_sizer, title_label, close_button
+    ):
+        """Swap section title and close button for Arabic."""
+        header_panel = header_sizer.GetContainingWindow()
+        if header_panel is not None:
+            header_panel.SetLayoutDirection(wx.Layout_LeftToRight)
+        header_sizer.Clear(delete_windows=False)
+        if self.language_code == "ar":
+            header_sizer.Add(close_button, 0, wx.LEFT | wx.TOP, 4)
+            if section_name == "console":
+                header_sizer.Add(self.clear_status_button, 0, wx.LEFT | wx.TOP, 4)
+            header_sizer.AddStretchSpacer()
+            header_sizer.Add(title_label, 0, wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, 6)
+        else:
+            header_sizer.Add(title_label, 1, wx.ALIGN_CENTER_VERTICAL | wx.LEFT, 6)
+            if section_name == "console":
+                header_sizer.Add(self.clear_status_button, 0, wx.RIGHT | wx.TOP, 4)
+            header_sizer.Add(close_button, 0, wx.RIGHT | wx.TOP, 4)
+        header_sizer.Layout()
+        if header_panel is not None:
+            header_panel.Layout()
 
     def update_section_window_menu(self):
         """Tick Window menu items to match the current panel visibility."""
         for section_name, menu_item in self.window_menu_items.items():
-            menu_item.Check(self.section_panels[section_name].IsShown())
+            menu_item.Check(self.section_visible[section_name])
+
+    def update_side_splitter_panels(self):
+        """Show Simulation and Switches according to their stored visibility."""
+        simulation_panel = self.section_panels["simulation"]
+        switch_panel = self.section_panels["switches"]
+        simulation_window = self.side_splitter_windows["simulation"]
+        switch_window = self.side_splitter_windows["switches"]
+        show_simulation = self.section_visible["simulation"]
+        show_switches = self.section_visible["switches"]
+
+        if self.side_splitter.IsSplit():
+            self.side_splitter.Unsplit()
+
+        simulation_panel.Show(show_simulation)
+        switch_panel.Show(show_switches)
+        simulation_window.Show(show_simulation)
+        switch_window.Show(show_switches)
+        self.side_splitter.Show(show_simulation or show_switches)
+
+        if show_simulation and show_switches:
+            current_panel = self.side_splitter.GetWindow1()
+            if current_panel is not None and current_panel != simulation_window:
+                self.side_splitter.ReplaceWindow(current_panel, simulation_window)
+            self.side_splitter.SplitHorizontally(
+                simulation_window, switch_window, sashPosition=250
+            )
+        elif show_simulation or show_switches:
+            visible_panel = simulation_window if show_simulation else switch_window
+            current_panel = self.side_splitter.GetWindow1()
+            if current_panel is None:
+                self.side_splitter.Initialize(visible_panel)
+            elif current_panel != visible_panel:
+                self.side_splitter.ReplaceWindow(current_panel, visible_panel)
+
+        self.apply_splitter_style()
+
+    def apply_splitter_style(self):
+        """Keep the simulation/switch splitter divider visually quiet."""
+        self.side_splitter.SetBackgroundColour(self.theme["frame_bg"])
+        for splitter_window in self.side_splitter_windows.values():
+            splitter_window.SetBackgroundColour(self.theme["frame_bg"])
+        if hasattr(self.side_splitter, "SetSashInvisible"):
+            self.side_splitter.SetSashInvisible(True)
 
     def get_system_theme_name(self):
         """Return the OS light/dark appearance, falling back to colour brightness."""
@@ -2931,6 +3200,7 @@ class Gui(wx.Frame):
 
         for control in themed_controls:
             self.apply_theme_to_control(control)
+        self.apply_splitter_style()
 
         for section_name, panel in self.section_panels.items():
             panel.SetBackgroundColour(self.theme["frame_bg"])
@@ -3476,8 +3746,9 @@ class Gui(wx.Frame):
         switch_names = self.get_switch_names()
         if not switch_names:
             empty_label = wx.StaticText(self.switch_rows, wx.ID_ANY, _("No switches"))
+            self.align_static_text(empty_label)
             empty_label.SetForegroundColour(self.theme["muted_text"])
-            self.switch_rows_sizer.Add(empty_label, 0, wx.ALL, 6)
+            self.switch_rows_sizer.Add(empty_label, 0, wx.EXPAND | wx.ALL, 6)
         else:
             for switch_name in switch_names:
                 self.add_switch_row(switch_name)
@@ -3557,10 +3828,10 @@ class Gui(wx.Frame):
         # Save open/closed pane state first so user navigation is not lost
         self.store_module_signal_pane_state()
         scroll_x, scroll_y = self.module_signal_rows.GetViewStart()
-        self.module_signal_rows_sizer.Clear(delete_windows=True)
         self.module_signal_button_names = {}
         self.module_signal_action_buttons = {}
         self.module_signal_pane_paths = {}
+        self.module_signal_rows_sizer.Clear(delete_windows=True)
 
         top_level_signal_names = self.get_top_level_signal_names()
         module_signal_groups = self.get_module_signal_groups()
@@ -3569,8 +3840,9 @@ class Gui(wx.Frame):
             empty_label = wx.StaticText(
                 self.module_signal_rows, wx.ID_ANY, _("No monitorable signals")
             )
+            self.align_static_text(empty_label)
             empty_label.SetForegroundColour(self.theme["muted_text"])
-            self.module_signal_rows_sizer.Add(empty_label, 0, wx.ALL, 6)
+            self.module_signal_rows_sizer.Add(empty_label, 0, wx.EXPAND | wx.ALL, 6)
         else:
             for signal_name in sorted(top_level_signal_names):
                 self.add_available_signal_row(
@@ -3625,14 +3897,24 @@ class Gui(wx.Frame):
             if module_name == "signals_at_this_level":
                 continue
             pane_label = module_name + " internals"
+            pane_parent = parent
+            if self.language_code == "ar":
+                pane_parent = wx.Panel(parent, wx.ID_ANY)
+                pane_parent.SetBackgroundColour(self.theme["panel_bg"])
+                pane_parent.SetLayoutDirection(wx.Layout_LeftToRight)
+
             collapsible_pane = wx.CollapsiblePane(
-                parent, wx.ID_ANY, pane_label, style=COLLAPSIBLE_PANE_STYLE
+                pane_parent, wx.ID_ANY, pane_label, style=COLLAPSIBLE_PANE_STYLE
             )
+            if self.language_code == "ar":
+                collapsible_pane.SetLayoutDirection(wx.Layout_RightToLeft)
             pane_font = collapsible_pane.GetFont()
             pane_font.SetWeight(wx.FONTWEIGHT_BOLD)
             collapsible_pane.SetFont(pane_font)
             self.set_collapsible_pane_colours(collapsible_pane)
             pane = collapsible_pane.GetPane()
+            if self.language_code == "ar":
+                pane.SetLayoutDirection(wx.Layout_LeftToRight)
             pane.SetBackgroundColour(self.theme["panel_bg"])
             pane_sizer = wx.BoxSizer(wx.HORIZONTAL)
             guide_panel = wx.Panel(pane, wx.ID_ANY)
@@ -3644,10 +3926,16 @@ class Gui(wx.Frame):
             self.add_module_signal_group_rows(
                 pane, child_sizer, signal_group[module_name], module_path
             )
-            pane_sizer.AddSpacer((HIERARCHY_GUIDE_WIDTH - 1) // 2)
-            pane_sizer.Add(guide_panel, 0, wx.EXPAND)
-            pane_sizer.AddSpacer((HIERARCHY_GUIDE_WIDTH - 1) // 2)
-            pane_sizer.Add(child_sizer, 1, wx.EXPAND)
+            if self.language_code == "ar":
+                pane_sizer.Add(child_sizer, 1, wx.EXPAND)
+                pane_sizer.AddSpacer((HIERARCHY_GUIDE_WIDTH - 1) // 2)
+                pane_sizer.Add(guide_panel, 0, wx.EXPAND)
+                pane_sizer.AddSpacer((HIERARCHY_GUIDE_WIDTH - 1) // 2)
+            else:
+                pane_sizer.AddSpacer((HIERARCHY_GUIDE_WIDTH - 1) // 2)
+                pane_sizer.Add(guide_panel, 0, wx.EXPAND)
+                pane_sizer.AddSpacer((HIERARCHY_GUIDE_WIDTH - 1) // 2)
+                pane_sizer.Add(child_sizer, 1, wx.EXPAND)
 
             pane.SetSizer(pane_sizer)
 
@@ -3662,20 +3950,37 @@ class Gui(wx.Frame):
                 wx.EVT_COLLAPSIBLEPANE_CHANGED, self.on_module_signal_pane_changed
             )
             pane_row_sizer = wx.BoxSizer(wx.HORIZONTAL)
-            if parent_path:
-                pane_row_sizer.AddSpacer(MODULE_NESTED_INDENT_WIDTH)
-            pane_row_sizer.Add(collapsible_pane, 1, wx.EXPAND)
-            parent_sizer.Add(
-                pane_row_sizer,
-                0,
-                wx.EXPAND | wx.TOP | wx.BOTTOM | wx.LEFT | wx.RIGHT,
-                MODULE_PANE_GAP,
-            )
+            if self.language_code == "ar":
+                pane_row_sizer.AddStretchSpacer(1)
+                pane_row_sizer.Add(collapsible_pane, 0, wx.EXPAND)
+                if parent_path:
+                    pane_row_sizer.AddSpacer(MODULE_NESTED_INDENT_WIDTH)
+                pane_parent.SetSizer(pane_row_sizer)
+                parent_sizer.Add(
+                    pane_parent,
+                    0,
+                    wx.EXPAND | wx.TOP | wx.BOTTOM | wx.LEFT | wx.RIGHT,
+                    MODULE_PANE_GAP,
+                )
+            else:
+                if parent_path:
+                    pane_row_sizer.AddSpacer(MODULE_NESTED_INDENT_WIDTH)
+                pane_row_sizer.Add(collapsible_pane, 1, wx.EXPAND)
+                parent_sizer.Add(
+                    pane_row_sizer,
+                    0,
+                    wx.EXPAND | wx.TOP | wx.BOTTOM | wx.LEFT | wx.RIGHT,
+                    MODULE_PANE_GAP,
+                )
 
     def store_module_signal_pane_state(self):
         """Remember expanded module panes before the signal list is rebuilt."""
         for pane, module_path in self.module_signal_pane_paths.values():
-            if pane.IsExpanded():
+            try:
+                is_expanded = pane.IsExpanded()
+            except RuntimeError:
+                continue
+            if is_expanded:
                 self.module_signal_expanded_paths.add(module_path)
             else:
                 self.module_signal_expanded_paths.discard(module_path)
@@ -3716,15 +4021,24 @@ class Gui(wx.Frame):
         self.module_signal_action_buttons[signal_name] = action_button
         self.update_available_signal_button(action_button, signal_name)
 
-        if indent > 0:
-            row_sizer.AddSpacer(indent)
         action_column_sizer = wx.BoxSizer(wx.HORIZONTAL)
         action_column_sizer.SetMinSize(
             (SIGNAL_ACTION_COLUMN_WIDTH, SIGNAL_ACTION_BUTTON_SIZE)
         )
         action_column_sizer.Add(action_button, 0, wx.ALIGN_CENTER_VERTICAL)
-        row_sizer.Add(action_column_sizer, 0, wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, 4)
-        row_sizer.Add(label, 1, wx.ALIGN_CENTER_VERTICAL)
+        if self.language_code == "ar":
+            row_sizer.AddStretchSpacer(1)
+            if indent > 0:
+                row_sizer.AddSpacer(indent)
+            row_sizer.Add(label, 0, wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, 4)
+            row_sizer.Add(action_column_sizer, 0, wx.ALIGN_CENTER_VERTICAL)
+        else:
+            if indent > 0:
+                row_sizer.AddSpacer(indent)
+            row_sizer.Add(
+                action_column_sizer, 0, wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, 4
+            )
+            row_sizer.Add(label, 1, wx.ALIGN_CENTER_VERTICAL)
         parent_sizer.Add(row_sizer, 0, wx.EXPAND | wx.ALL, 4)
 
     def update_available_signal_button(self, button, signal_name):

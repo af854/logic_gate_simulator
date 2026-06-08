@@ -47,6 +47,7 @@ class DummyGui:
     get_live_trace_interval_ms = Gui.get_live_trace_interval_ms
     on_live_trace_speed_button = Gui.on_live_trace_speed_button
     update_live_trace_speed_button = Gui.update_live_trace_speed_button
+    update_live_trace_status_text = Gui.update_live_trace_status_text
     show_no_loaded_circuit_error = Gui.show_no_loaded_circuit_error
     update_file_dependent_controls = Gui.update_file_dependent_controls
     on_run_cycles_button = Gui.on_run_cycles_button
