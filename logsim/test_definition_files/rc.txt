@@ -5,7 +5,7 @@ DEVICES
 
 CONNECT
     AND1.I1 = CLK;
-    AND1.I2 = RC1.I1;
+    AND1.I2 = RC1;
 
 
 MONITOR
