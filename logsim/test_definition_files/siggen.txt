@@ -1,3 +1,4 @@
+/* An 8-to-1 MUX, using S2 S1 S0 as a 3-bit select signal */
 MODULE MUX8
     INPUTS A, B, C, D, E, F, G, H, S0, S1, S2;
     OUTPUTS Y;
@@ -28,20 +29,21 @@ MODULE MUX8
 
 ENDMODULE;
 
-
+/* Top-Level Circuit */ 
 DEVICES
     SWITCH(0) S0;
     SWITCH(0) S1;
     SWITCH(0) S2;
 
-    SIGGEN(1011100000000000) A_SIG;  # A = .-
-    SIGGEN(1110101010000000) B_SIG;  # B = -...
-    SIGGEN(1110101110100000) C_SIG;  # C = -.-.
-    SIGGEN(1110101000000000) D_SIG;  # D = -..
-    SIGGEN(1000000000000000) E_SIG;  # E = .
-    SIGGEN(1010111010000000) F_SIG;  # F = ..-.
-    SIGGEN(1110111010000000) G_SIG;  # G = --.
-    SIGGEN(1010101000000000) H_SIG;  # H = ....
+    # Morse code generators for first 8 letters, zero-padded to 14 cycles
+    SIGGEN(10111000000000) A_SIG;  # A = .-
+    SIGGEN(11101010100000) B_SIG;  # B = -...
+    SIGGEN(11101011101000) C_SIG;  # C = -.-.
+    SIGGEN(11101010000000) D_SIG;  # D = -..
+    SIGGEN(10000000000000) E_SIG;  # E = .
+    SIGGEN(10101110100000) F_SIG;  # F = ..-.
+    SIGGEN(11101110100000) G_SIG;  # G = --.
+    SIGGEN(10101010000000) H_SIG;  # H = ....
     MUX8 MORSE_MUX;
 
 CONNECT
