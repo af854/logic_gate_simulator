@@ -10,6 +10,11 @@ Parser - parses the definition file and builds the logic network.
 """
 
 from parser_objects import ModuleDefinition, ModuleDevice, Signal
+from scanner import Symbol
+
+# TYPE ALIASES
+DeviceKindResult = tuple[str, int, int | str | None]
+DeviceStatementResult = tuple[Symbol, DeviceKindResult, list[Symbol]]
 
 # Max error messages to display. A count of the number of additional
 # errors will be displayed after MAX_ERROR_MSGS is displayed.
@@ -29,8 +34,8 @@ MAX_MODULE_INSTANTIATION_DEPTH = 20
 # - Modules
 # - Hierarchical modules
 # - Error Recovery
-# - Typo hints
-#
+# - Typo hints: fuzzy string matching
+# - Non-critical warnings
 #
 # Design pattern for parsing in this file:
 #    Parsing functions are based on the EBNF specification as closely as possible
@@ -159,7 +164,8 @@ class Parser:
     parse_network(self): Parse the circuit definition file.
     """
 
-    def __init__(self, names, devices, network, monitors, scanner):
+    def __init__(self, names: object, devices: object, network: object,
+                 monitors: object, scanner: object) -> None:
         """Initialise parser state and store references to simulator objects.
 
         Arguments:
@@ -237,7 +243,7 @@ class Parser:
         self.error_count = 0
         self.warning_count = 0
 
-    def advance(self):
+    def _advance(self) -> None:
         """Advance self.symbol to the next valid scanner symbol.
 
         Effects:
@@ -250,9 +256,9 @@ class Parser:
         while self.symbol.type == self.scanner.UNKNOWN:
             bad_text = self.symbol.raw_text
             if bad_text is None:
-                self.error("Invalid symbol or character!")
+                self._error("Invalid symbol or character!")
             else:
-                self.error("Invalid symbol or character: '" + bad_text + "'")
+                self._error("Invalid symbol or character: '" + bad_text + "'")
             self.symbol = self.scanner.get_symbol()
 
         # Small rolling window of recent names used to check typos in section keywords
@@ -260,7 +266,7 @@ class Parser:
             self.recent_names.append(self.symbol)
             self.recent_names = self.recent_names[-10:]
 
-    def synchronize(self, stopping_types=None):
+    def _synchronize(self, stopping_types: list[int | str] | None = None, consume_semicolon: bool = True) -> None:
         """Advance scanner until stopping symbol or EOF is reached for error recovery.
 
         Optional arguments:
@@ -284,33 +290,33 @@ class Parser:
             and self.symbol.type != self.scanner.EOF
             and not (
                 self.symbol.type == self.scanner.KEYWORD
-                and self.symbol_string() in stopping_types
+                and self._symbol_string() in stopping_types
             )
         ):
-            self.advance()
-        if self.symbol.type == self.scanner.SEMICOLON:
-            self.advance()
+            self._advance()
+        if consume_semicolon and self.symbol.type == self.scanner.SEMICOLON:
+            self._advance()
 
-    def symbol_string(self):
+    def _symbol_string(self) -> str | None:
         """Return the string name of the current symbol, or None if nonexistent."""
         if self.symbol.id is None:
             return None
         return self.names.get_name_string(self.symbol.id)
 
-    def is_keyword_name(self, name):
+    def _is_keyword_name(self, name: str) -> bool:
         """Return True if the current symbol is the given keyword.
 
         Arguments:
         name -- keyword string to compare with the current symbol.
 
         """
-        return self.symbol.type == self.scanner.KEYWORD and self.symbol_string() == name
+        return self.symbol.type == self.scanner.KEYWORD and self._symbol_string() == name
 
-    def is_section_keyword(self):
+    def _is_section_keyword(self) -> bool:
         """Return True if the current symbol is a section keyword."""
         return (
             self.symbol.type == self.scanner.KEYWORD
-            and self.symbol_string() in self.section_keyword_strings
+            and self._symbol_string() in self.section_keyword_strings
         )
 
     ################################################################################
@@ -318,14 +324,14 @@ class Parser:
     ################################################################################
 
     # General error message
-    def error(
+    def _error(
         self,
-        errormsg,
-        symbol=None,
-        synchronize=False,
-        stopping_types=None,
-        hide_location=False,
-    ):
+        errormsg: str,
+        symbol: Symbol | None = None,
+        synchronize: bool = False,
+        stopping_types: list[int | str] | None = None,
+        hide_location: bool = False,
+    ) -> None:
         """Print a descriptive error message and increment the error count.
 
         Arguments:
@@ -358,9 +364,9 @@ class Parser:
                 )
                 self.scanner.print_error_line(symbol.line_num, symbol.line_pos)
         if synchronize:
-            self.synchronize(stopping_types)
+            self._synchronize(stopping_types)
 
-    def fatal_error(self):
+    def _fatal_error(self) -> None:
         """Print error message when parsing cannot safely continue.
 
         Effects:
@@ -383,7 +389,7 @@ class Parser:
         )
         print("structural error(s) in file.")
 
-    def warning(self, warningmsg, symbol=None, hide_location=False):
+    def _warning(self, warningmsg: str, symbol: Symbol | None = None, hide_location: bool = False) -> None:
         """Print a descriptive warning message without incrementing error_count.
 
         Arguments:
@@ -416,7 +422,7 @@ class Parser:
             )
             self.scanner.print_error_line(symbol.line_num, symbol.line_pos)
 
-    def can_build_network(self):
+    def _can_build_network(self) -> bool:
         """Return True if network construction is still allowed.
 
         Return True only if no errors have been reported so far. After the first error,
@@ -426,7 +432,7 @@ class Parser:
         return self.error_count == 0
 
     # Deal with an error from Devices class
-    def device_error_message(self, error_type):
+    def _device_error_message(self, error_type: int) -> str | None:
         """Translate a devices error code into a useful message.
 
         Arguments:
@@ -452,7 +458,7 @@ class Parser:
             return "Device has already been defined"
         return "Unknown device error"
 
-    def connection_error_message(self, error_type):
+    def _connection_error_message(self, error_type: int) -> str | None:
         """Translate a network error code into a useful message.
 
         Arguments:
@@ -484,7 +490,7 @@ class Parser:
             # so, e.g. a typo in a net name can also lead to this error type
         return "Unknown connection error"
 
-    def monitor_error_message(self, error_type):
+    def _monitor_error_message(self, error_type: int) -> str | None:
         """Translate a monitors error code into a useful message.
 
         Arguments:
@@ -503,7 +509,7 @@ class Parser:
             return "Specified name does not match a device or net"
         return "Unknown monitor error"
 
-    def possible_typo(self, a, b):
+    def _possible_typo(self, a: str | None, b: str | None) -> bool:
         """
         Return True if strings a and b are likely to be typos of each other.
 
@@ -566,7 +572,7 @@ class Parser:
             threshold = 1
         return ans <= threshold
 
-    def section_typo_hint(self, keyword):
+    def _section_typo_hint(self, keyword: str) -> str:
         """Return a did-you-mean hint for a possible section typo.
 
         Arguments:
@@ -580,7 +586,7 @@ class Parser:
         for symbol in reversed(self.recent_names):
             typo_string = self.names.get_name_string(symbol.id)
 
-            if self.possible_typo(typo_string, keyword):
+            if self._possible_typo(typo_string, keyword):
                 return (
                     "\n-> In line "
                     + str(symbol.line_num + 1)
@@ -593,7 +599,7 @@ class Parser:
 
         return ""
 
-    def name_typo_hint(self, bad_name_id, candidate_ids, candidate_description):
+    def _name_typo_hint(self, bad_name_id: int | None, candidate_ids: set[int] | list[int], candidate_description: str) -> str:
         """Return a did-you-mean hint for a possible name typo.
 
         Arguments:
@@ -609,7 +615,7 @@ class Parser:
         bad_name_string = self.names.get_name_string(bad_name_id)
         for candidate_id in candidate_ids:
             candidate_name_string = self.names.get_name_string(candidate_id)
-            if self.possible_typo(bad_name_string, candidate_name_string):
+            if self._possible_typo(bad_name_string, candidate_name_string):
                 return (
                     "\n-> Did you mean "
                     + candidate_description
@@ -620,7 +626,7 @@ class Parser:
 
         return ""
 
-    def signal_name_typo_hint(self, bad_name_id):
+    def _signal_name_typo_hint(self, bad_name_id: int | None) -> str:
         """Return a did-you-mean hint for a top-level signal name.
 
         Arguments:
@@ -634,16 +640,16 @@ class Parser:
         for device in self.devices.devices_list:
             device_ids.append(device.device_id)
 
-        hint = self.name_typo_hint(bad_name_id, device_ids, "device")
+        hint = self._name_typo_hint(bad_name_id, device_ids, "device")
         if hint == "":
-            hint = self.name_typo_hint(bad_name_id, self.net_ids, "net")
+            hint = self._name_typo_hint(bad_name_id, self.net_ids, "net")
         if hint == "":
-            hint = self.name_typo_hint(
+            hint = self._name_typo_hint(
                 bad_name_id, self.module_instance_ids, "module instance"
             )
         return hint
 
-    def module_signal_name_typo_hint(self, bad_name_id, module_definition):
+    def _module_signal_name_typo_hint(self, bad_name_id: int | None, module_definition: ModuleDefinition) -> str:
         """Return a did-you-mean hint for a signal inside a module.
 
         Arguments:
@@ -654,21 +660,21 @@ class Parser:
         or an empty string if no good candidate exists.
 
         """
-        hint = self.name_typo_hint(
+        hint = self._name_typo_hint(
             bad_name_id, module_definition.device_ids, "module's device"
         )
         if hint == "":
-            hint = self.name_typo_hint(
+            hint = self._name_typo_hint(
                 bad_name_id, module_definition.net_ids, "module's net"
             )
         if hint == "":
             module_port_ids = module_definition.input_ids.union(
                 module_definition.output_ids
             )
-            hint = self.name_typo_hint(bad_name_id, module_port_ids, "module's port")
+            hint = self._name_typo_hint(bad_name_id, module_port_ids, "module's port")
         return hint
 
-    def device_kind_typo_hint(self, bad_kind_id):
+    def _device_kind_typo_hint(self, bad_kind_id: int | None) -> str:
         """Return string containing typo hint for device kinds and module types.
 
         Arguments:
@@ -682,7 +688,7 @@ class Parser:
             self.devices.SIGGEN,
         ]
 
-        hint = self.name_typo_hint(
+        hint = self._name_typo_hint(
             bad_kind_id,
             primitive_device_ids,
             "device type",
@@ -692,7 +698,7 @@ class Parser:
         for module_definition in self.module_definitions.values():
             module_type_ids.append(module_definition.name_symbol.id)
 
-        hint += self.name_typo_hint(
+        hint += self._name_typo_hint(
             bad_kind_id,
             module_type_ids,
             "module type",
@@ -704,7 +710,7 @@ class Parser:
     # PARSING HELPER FUNCTIONS
     #############################################################################################
 
-    def is_parameterised_device(self):
+    def _is_parameterised_device(self) -> bool:
         """Return True if the current symbol is a parameterised device keyword.
 
         Recognised parameterised device keywords are AND, NAND, OR, NOR, CLOCK, and
@@ -720,7 +726,7 @@ class Parser:
         ) or (self.symbol.id in [self.devices.CLOCK, self.devices.SWITCH,
                                  self.devices.RC, self.devices.SIGGEN])
 
-    def is_fixed_device(self):
+    def _is_fixed_device(self) -> bool:
         """Return True if the current symbol is a fixed device keyword.
 
         Recognised fixed device keywords are DTYPE and XOR.
@@ -734,7 +740,7 @@ class Parser:
             self.devices.D_TYPE,
         ]
 
-    def device_exists(self, symbol):
+    def _device_exists(self, symbol: Symbol) -> bool:
         """Return True if symbol refers to an existing device."""
         return self.devices.get_device(symbol.id) is not None
 
@@ -742,12 +748,14 @@ class Parser:
     # EBNF PARSING: BASIC EBNF RULES
     #############################################################################################
 
-    def parse_name(self, consume_reserved_keyword=False, expected_name=None):
+    def _parse_name(self, context_is_name_list: bool = False, expected_name: str | None = None) -> Symbol | None:
         """Parse a NAME symbol and return its Symbol object.
 
         Optional arguments:
-        consume_reserved_keyword -- if True, consume a reserved keyword when one is
-        found where a name was expected. This is mainly for recovery in lists.
+        context_is_name_list -- if True, this means we are parsing the name as part
+        of a name list. This means a few things: we SHOULD consume a reserved keyword 
+        when one is found where a name was expected, to allow for recovery in lists.
+        It also means parse_name_list can deal with the semicolon so we should not sync pass it.
         expected_name -- description of the expected name, used only to improve the
         error message.
 
@@ -755,7 +763,7 @@ class Parser:
 
         Effects:
         Advances past the name if successful. On error, prints an error message,
-        increments error_count, and synchronizes. If consume_reserved_keyword is True,
+        increments error_count, and synchronizes. If context_is_name_list is True,
         may also advance past the keyword before synchronizing.
 
         Restrictions:
@@ -766,7 +774,7 @@ class Parser:
         # symbol's location, this will be helpful for error messages.
         if self.symbol.type == self.scanner.NAME:
             name_symbol = self.symbol
-            self.advance()  # consume the name
+            self._advance()  # consume the name
             return name_symbol
 
         else:
@@ -784,8 +792,8 @@ class Parser:
                 errormsg += ", but got reserved keyword '"
                 errormsg += self.symbol.raw_text + "'."
 
-                if consume_reserved_keyword:
-                    self.advance()
+                if context_is_name_list:
+                    self._advance()
 
             elif self.symbol.type == self.scanner.EOF:
                 errormsg += ", but reached end of file."
@@ -793,11 +801,20 @@ class Parser:
             else:
                 errormsg += ", but got '" + self.symbol.raw_text + "'."
 
-            self.error(errormsg, bad_symbol, synchronize=True)
+            if context_is_name_list:
+                self._error(errormsg, bad_symbol)
+                self._synchronize(
+                    [self.scanner.COMMA, self.scanner.SEMICOLON, self.scanner.EOF]
+                    + self.section_keyword_strings,
+                    consume_semicolon=False # Synchronize but don't consume the semicolon
+                                            # to avoid extraneous second error
+                )
+            else:
+                self._error(errormsg, bad_symbol, synchronize=True)
 
         return None
 
-    def parse_name_list(self, expected_name=None):
+    def _parse_name_list(self, expected_name: str | None = None) -> list[Symbol] | None:
         """Parse a comma-separated name_list.
 
         EBNF: name_list = name, { ',', name }.
@@ -817,17 +834,17 @@ class Parser:
         """
         name_list = []
 
-        name_symbol = self.parse_name(
-            consume_reserved_keyword=True, expected_name=expected_name
+        name_symbol = self._parse_name(
+            context_is_name_list=True, expected_name=expected_name
         )
         if name_symbol is not None:
             name_list.append(name_symbol)
 
         while self.symbol.type == self.scanner.COMMA:
-            self.advance()
+            self._advance()
 
-            name_symbol = self.parse_name(
-                consume_reserved_keyword=True, expected_name=expected_name
+            name_symbol = self._parse_name(
+                context_is_name_list=True, expected_name=expected_name
             )
             if name_symbol is None:
                 continue
@@ -838,7 +855,7 @@ class Parser:
 
         return name_list
 
-    def parse_signal(self):
+    def _parse_signal(self) -> Signal | None:
         """Parse a signal or literal.
 
         EBNF: signal = name, [ '.', name ], literal = 0 | 1
@@ -859,14 +876,14 @@ class Parser:
             value = self.symbol.id
 
             if value not in [0, 1]:
-                self.error(
+                self._error(
                     "Only 0 or 1 can be used as a signal literal",
                     literal_symbol,
                     synchronize=True,
                 )
                 return None
 
-            self.advance()
+            self._advance()
             return Signal(
                 main_symbol=literal_symbol,
                 port_symbol=None,
@@ -874,17 +891,17 @@ class Parser:
                 literal_value=value,
             )
 
-        name_symbol = self.parse_name(
-            expected_name="signal name", consume_reserved_keyword=True
+        name_symbol = self._parse_name(
+            expected_name="signal name"
         )
         if name_symbol is None:
             return None
 
         if self.symbol.type == self.scanner.DOT:
-            self.advance()
+            self._advance()
 
-            port_symbol = self.parse_name(
-                expected_name="port name", consume_reserved_keyword=True
+            port_symbol = self._parse_name(
+                expected_name="port name"
             )
             if port_symbol is None:
                 return None
@@ -892,7 +909,7 @@ class Parser:
             return Signal(main_symbol=name_symbol, port_symbol=port_symbol)
         return Signal(main_symbol=name_symbol, port_symbol=None)
 
-    def parse_signal_list(self):
+    def _parse_signal_list(self) -> list[Signal] | None:
         """Parse a comma-separated signal_list.
 
         EBNF: signal_list = signal, { ',', signal }.
@@ -909,22 +926,22 @@ class Parser:
         """
         signal_list = []
 
-        signal = self.parse_signal()
+        signal = self._parse_signal()
         if signal is None:
             return None
         signal_list.append(signal)
 
         while self.symbol.type == self.scanner.COMMA:
-            self.advance()
+            self._advance()
 
-            signal = self.parse_signal()
+            signal = self._parse_signal()
             if signal is None:
                 return None
             signal_list.append(signal)
 
         return signal_list
 
-    def parse_connection_statement(self):
+    def _parse_connection_statement(self) -> tuple[list[Signal], Signal] | None:
         """Parse one connection statement.
 
         EBNF: signal_list, '=', source, ';', where source is a signal or literal.
@@ -942,43 +959,44 @@ class Parser:
         called with self.symbol at the first signal of a connection statement.
 
         """
-        input_signal_list = self.parse_signal_list()
+        input_signal_list = self._parse_signal_list()
         if input_signal_list is None:
             return None
         if self.symbol.type != self.scanner.EQUALS:
             errormsg = "Expected '=' in connection"
-            errormsg += self.section_typo_hint("MONITOR")
-            errormsg += self.section_typo_hint("ENDMODULE")
-            self.error(errormsg, synchronize=True)
+            errormsg += self._section_typo_hint("MONITOR")
+            errormsg += self._section_typo_hint("ENDMODULE")
+            self._error(errormsg, synchronize=True)
 
             return None
-        self.advance()
+        self._advance()
 
-        output_signal = self.parse_signal()
+        output_signal = self._parse_signal()
         if output_signal is None:
             return None
 
         if self.symbol.type != self.scanner.SEMICOLON:
             if self.symbol.type == self.scanner.COMMA:
-                self.error(
+                self._error(
                     "RHS of connection statement can only have one signal",
                     synchronize=True,
                 )
             else:
-                self.error("Expected semicolon after connection", synchronize=True)
+                self._error("Expected semicolon after connection", synchronize=True)
             return None
 
-        self.advance()
+        self._advance()
         return input_signal_list, output_signal
 
-    def parse_device_kind(self):
+    def _parse_device_kind(self) -> DeviceKindResult | None:
         """Parse a primitive or module device kind.
 
         Parses parameterised_device, '(', number, ')', fixed_device, or module_device.
 
         Return a tuple (kind_type, device_kind_id, device_parameter), where kind_type is
         "primitive" or "module". For primitive devices, device_kind_id is the device
-        kind name ID and device_parameter is an integer or None. For modules,
+        kind name ID and device_parameter is an integer (for gates, CLK, and RC,
+        string (for SIGGEN), or None. For modules,
         device_kind_id is the module name ID and device_parameter is None. Return None
         on error.
 
@@ -995,20 +1013,20 @@ class Parser:
 
         if self.symbol.type == self.scanner.NAME:
             # Then it should be a module name
-            module_name_string = self.symbol_string()
+            module_name_string = self._symbol_string()
 
             if (
                 module_name_string in self.module_definitions
-                or not self.can_build_network()
+                or not self._can_build_network()
             ):
                 # if we can't build the network, syntax check only
                 module_name_id = self.symbol.id
-                self.advance()
+                self._advance()
                 # Now we're pointing at the next symbol
                 # check that it's not ( for a more helpful error message
                 # (otherwise we get error message expected a name)
                 if self.symbol.type == self.scanner.L_BRACKET:
-                    self.error(
+                    self._error(
                         "Module type should not have parentheses", synchronize=True
                     )
                     return None
@@ -1019,28 +1037,28 @@ class Parser:
             errormsg = "Expected primitive device type (e.g. AND) " \
                        "or previously-defined module name"
 
-            errormsg += self.device_kind_typo_hint(self.symbol.id)
-            errormsg += self.section_typo_hint("NETS")
+            errormsg += self._device_kind_typo_hint(self.symbol.id)
+            errormsg += self._section_typo_hint("NETS")
 
-            if self.device_exists(self.symbol):
+            if self._device_exists(self.symbol):
                 errormsg += "\nAre you trying to connect a device? "
                 errormsg += "This should be done in the CONNECT section."
-                errormsg += self.section_typo_hint("CONNECT")
+                errormsg += self._section_typo_hint("CONNECT")
 
-            self.error(errormsg, synchronize=True)
+            self._error(errormsg, synchronize=True)
             return None
 
-        if self.is_parameterised_device():
+        if self._is_parameterised_device():
             device_kind_id = self.symbol.id
 
-            self.advance()  # consume the device type like AND
+            self._advance()  # consume the device type like AND
             if self.symbol.type != self.scanner.L_BRACKET:
-                self.error("Expected '(' after parameterised device", synchronize=True)
+                self._error("Expected '(' after parameterised device", synchronize=True)
                 return None
-            self.advance()  # consume (
+            self._advance()  # consume (
 
             if self.symbol.type != self.scanner.NUMBER:
-                self.error("Expected number", synchronize=True)
+                self._error("Expected number", synchronize=True)
                 return None
 
             parameter_symbol = self.symbol
@@ -1050,18 +1068,18 @@ class Parser:
             else:
                 device_parameter = self.symbol.id            
                 
-            self.advance()  # consume the parameter
+            self._advance()  # consume the parameter
 
             if device_kind_id in [self.devices.CLOCK, self.devices.RC] and device_parameter < 1:
-                self.error("Invalid device parameter: should be 1 or greater",
+                self._error("Invalid device parameter: should be 1 or greater",
                            parameter_symbol, synchronize=True)
                 return None
             if device_kind_id in self.devices.gate_types and not 1 <= device_parameter <= 16:
-                self.error("Invalid device parameter: should be between 1 and 16",
+                self._error("Invalid device parameter: should be between 1 and 16",
                            parameter_symbol, synchronize=True)
                 return None
             if device_kind_id == self.devices.SWITCH and device_parameter not in [0, 1]:
-                self.error("Invalid device parameter: should be 0 or 1",
+                self._error("Invalid device parameter: should be 0 or 1",
                            parameter_symbol, synchronize=True)
                 return None
             
@@ -1075,7 +1093,7 @@ class Parser:
                     if c not in ['0', '1']:
                         siggen_param_ok = False
                 if not siggen_param_ok:
-                    self.error("Invalid SIGGEN parameter: "
+                    self._error("Invalid SIGGEN parameter: "
                                "should be a binary pattern containing only 0 and 1",
                                parameter_symbol,
                                synchronize=True,
@@ -1083,30 +1101,30 @@ class Parser:
                     return None
 
             if self.symbol.type != self.scanner.R_BRACKET:
-                self.error("Expected ')'", synchronize=True)
+                self._error("Expected ')'", synchronize=True)
                 return None
 
-            self.advance()  # consume )
+            self._advance()  # consume )
             return "primitive", device_kind_id, device_parameter
 
-        if self.is_fixed_device():
+        if self._is_fixed_device():
             device_kind_id = self.symbol.id
-            self.advance()  # consume the device type like XOR
+            self._advance()  # consume the device type like XOR
             if self.symbol.type == self.scanner.L_BRACKET:
-                self.error(
+                self._error(
                     "This device kind should not have a parameter",
                     synchronize=True,
                 )
                 return None
             return "primitive", device_kind_id, None
 
-        self.error(
+        self._error(
             "Invalid device kind: '" + self.symbol.raw_text + "'.",
             synchronize=True,
         )        
         return None
 
-    def parse_device_statement(self):
+    def _parse_device_statement(self) -> DeviceStatementResult | None | bool:
         """Parse one device declaration statement syntactically.
 
         EBNF: device_kind, name_list, ';'.
@@ -1125,15 +1143,15 @@ class Parser:
         """
         device_kind_symbol = self.symbol
 
-        device_kind_result = self.parse_device_kind()
+        device_kind_result = self._parse_device_kind()
         if device_kind_result is None:
             return None
 
         if self.symbol.type == self.scanner.DOT:
-            errormsg = "Device declarations cannot use ports with the '.' character."
+            errormsg = "Device declarations cannot use ports (the '.' character)."
             errormsg += "\nIs this a connection statement in the wrong section?"
-            errormsg += self.section_typo_hint("CONNECT")
-            self.error(errormsg)
+            errormsg += self._section_typo_hint("CONNECT")
+            self._error(errormsg)
             # return False because we're likely in the wrong section
             # so should stop parsing instead of allowing a cascade
             return False
@@ -1141,18 +1159,18 @@ class Parser:
         if self.symbol.type == self.scanner.EQUALS:
             errormsg = "Device declarations cannot use '='."
             errormsg += "\nIs this a connection statement in the wrong section?"
-            errormsg += self.section_typo_hint("CONNECT")
-            self.error(errormsg)
+            errormsg += self._section_typo_hint("CONNECT")
+            self._error(errormsg)
             # return False because we're likely in the wrong section
             # so should stop parsing instead of allowing a cascade
             return False
 
-        device_names = self.parse_name_list(expected_name="device name")
+        device_names = self._parse_name_list(expected_name="device name")
         if device_names is None:
             if self.symbol.type == self.scanner.SEMICOLON:
-                self.advance()
+                self._advance()
             else:
-                self.synchronize()
+                self._synchronize()
             return None
 
         if self.symbol.type != self.scanner.SEMICOLON:
@@ -1163,33 +1181,33 @@ class Parser:
                 errormsg += "\nDevice declarations cannot use '='."
                 errormsg += "\nThis may be a connection statement in the wrong section."
                 errormsg += "\nDid you forget the CONNECT section keyword?"
-                errormsg += self.section_typo_hint("CONNECT")
-                self.error(errormsg)
+                errormsg += self._section_typo_hint("CONNECT")
+                self._error(errormsg)
                 # return False because we're likely in the wrong section
                 # so should stop parsing instead of allowing a cascade
                 return False
 
             elif self.symbol.type == self.scanner.DOT:
-                errormsg += "\nDevice declarations cannot use ports like '.I1'."
+                errormsg += "\nDevice declarations cannot use ports (the '.' character)."
                 errormsg += "\nThis may be a connection statement in the wrong section."
                 errormsg += "\nDid you forget the CONNECT section keyword?"
-                errormsg += self.section_typo_hint("CONNECT")
-                self.error(errormsg)
+                errormsg += self._section_typo_hint("CONNECT")
+                self._error(errormsg)
                 # return False because we're likely in the wrong section
                 # so should stop parsing instead of allowing a cascade
                 return False
 
-            self.error(errormsg, synchronize=True)
+            self._error(errormsg, synchronize=True)
             return None
 
-        self.advance()
+        self._advance()
         return device_kind_symbol, device_kind_result, device_names
 
     #############################################################################################
     # PARSING NETS AND NET HELPER FUNCTIONS
     #############################################################################################
 
-    def is_net(self, signal):
+    def _is_net(self, signal: Signal) -> bool:
         """Return True if signal is a declared top-level net without a port."""
         return (
             not signal.is_literal
@@ -1197,7 +1215,7 @@ class Parser:
             and signal.port_id is None
         )
 
-    def net_used_with_port(self, signal):
+    def _net_used_with_port(self, signal: Signal) -> bool:
         """Return True if signal illegally uses a declared net name with a port."""
         return (
             not signal.is_literal
@@ -1205,7 +1223,7 @@ class Parser:
             and signal.port_id is not None
         )
 
-    def parse_net_declaration(self):
+    def _parse_net_declaration(self) -> bool:
         """Parse one top-level net declaration statement.
 
         EBNF: name_list, ';'.
@@ -1224,51 +1242,51 @@ class Parser:
         the first net name of a declaration.
         """
         # 1. EBNF based syntax and collect the names of the nets
-        net_symbols = self.parse_name_list(expected_name="net name")
+        net_symbols = self._parse_name_list(expected_name="net name")
 
         if net_symbols is None:
             if self.symbol.type == self.scanner.SEMICOLON:
-                self.advance()
+                self._advance()
             else:
-                self.synchronize()
+                self._synchronize()
             return True
 
         if self.symbol.type != self.scanner.SEMICOLON:
             errormsg = "Expected semicolon after net declaration or" \
                        " comma to separate a list of nets."
-            if self.is_keyword_name("CONNECT"):
+            if self._is_keyword_name("CONNECT"):
                 errormsg += "\nThe NETS declaration may be malformed or"
                 errormsg += " missing a semicolon before CONNECT."
             if self.symbol.type == self.scanner.EQUALS:
                 errormsg += "\nThis looks like a connection statement."
                 errormsg += " Did you forget the CONNECT section?"
-                errormsg += self.section_typo_hint("CONNECT")
-                self.error(errormsg)
+                errormsg += self._section_typo_hint("CONNECT")
+                self._error(errormsg)
                 return False  # prevent long cascade if we're probably in the wrong section
             elif self.symbol.type == self.scanner.DOT:
                 errormsg = "Net declaration cannot have a port. Is this meant to be a"
                 errormsg += "\nconnection statement? " \
                             "The CONNECT section keyword might be missing."
-                errormsg += self.section_typo_hint("CONNECT")
-                self.error(errormsg)
+                errormsg += self._section_typo_hint("CONNECT")
+                self._error(errormsg)
                 return False  # prevent long cascade if we're probably in the wrong section
-            self.error(errormsg, synchronize=True)
+            self._error(errormsg, synchronize=True)
             return True
 
-        self.advance()
+        self._advance()
 
         # 2. Semantic checks and create the actual nets.
 
-        if not self.can_build_network():
+        if not self._can_build_network():
             return True
 
         for net_symbol in net_symbols:
-            if self.device_exists(
+            if self._device_exists(
                 net_symbol
             ):  # if a device already exists with the same name/id
                 # n.b. we dont need checks the other way (i.e. device name conflicts with net name)
                 # since device section is always before the nets section.
-                self.error(
+                self._error(
                     "Net name conflicts with an existing device name", net_symbol
                 )
                 continue
@@ -1277,20 +1295,20 @@ class Parser:
             # keep track of existing nets
 
             if net_id in self.module_instance_ids:
-                self.error(
+                self._error(
                     "Net name conflicts with an existing module instance name",
                     net_symbol,
                 )
                 continue
 
             if net_id in self.net_ids:
-                self.error("Net has already been declared", net_symbol)
+                self._error("Net has already been declared", net_symbol)
                 continue
             self.net_ids.add(net_id)
 
         return True
 
-    def parse_nets(self):
+    def _parse_nets(self) -> bool:
         """Parse the top-level NETS section.
 
         Return True if parsing reaches the CONNECT section. Return False if EOF or an
@@ -1305,27 +1323,27 @@ class Parser:
 
         """
         while True:
-            if self.is_keyword_name("CONNECT"):  # end of NETS section.
+            if self._is_keyword_name("CONNECT"):  # end of NETS section.
                 return True
 
-            if self.is_section_keyword():
+            if self._is_section_keyword():
                 errormsg = "Unexpected section keyword after NETS section - " \
                            "it should be followed by CONNECT section."
-                errormsg += self.section_typo_hint("CONNECT")
-                self.error(errormsg)
+                errormsg += self._section_typo_hint("CONNECT")
+                self._error(errormsg)
                 return False
 
             if self.symbol.type == self.scanner.EOF:
                 errormsg = "Unexpected end of file in NETS section - " \
                            "it should be followed by CONNECT section."
-                errormsg += self.section_typo_hint("CONNECT")
-                self.error(errormsg)
+                errormsg += self._section_typo_hint("CONNECT")
+                self._error(errormsg)
                 return False
 
-            if not self.parse_net_declaration():
+            if not self._parse_net_declaration():
                 return False
 
-    def flatten_net_driver_dict(self):
+    def _flatten_net_driver_dict(self) -> bool:
         """Flatten top-level net drivers to real driving signals.
 
         Return True if every driven net can be resolved to a non-net driver. Return
@@ -1345,16 +1363,16 @@ class Parser:
         for net_id in list(self.net_driver_dict.keys()):
             seen_net_ids = {net_id}
             driver = self.net_driver_dict[net_id]
-            while self.is_net(driver):
+            while self._is_net(driver):
                 driver_net_id = driver.main_id
                 if driver_net_id in seen_net_ids:
-                    self.error(
+                    self._error(
                         "Circular definition of nets detected", driver.main_symbol
                     )
                     return False
 
                 if driver_net_id not in self.net_driver_dict:
-                    self.error("Net has no driver", driver.main_symbol)
+                    self._error("Net has no driver", driver.main_symbol)
                     return False
 
                 seen_net_ids.add(driver_net_id)
@@ -1367,7 +1385,7 @@ class Parser:
     # HELPER FUNCTIONS FOR LITERALS
     #############################################################################################
 
-    def get_or_create_const_switch(self, signal):
+    def _get_or_create_const_switch(self, signal: Signal) -> int | None:
         """Return the internal SWITCH device ID for a literal signal.
 
         Arguments:
@@ -1389,11 +1407,11 @@ class Parser:
         # switch name @LITERAL_0 or @LITERAL_1
         # and use that to provide the literal signal.
 
-        if not self.can_build_network():
+        if not self._can_build_network():
             return None
 
         if not signal.is_literal:
-            self.error(
+            self._error(
                 "Internal error: get_or_create_const_switch called on a non-literal signal",
                 signal.main_symbol,
             )
@@ -1405,7 +1423,7 @@ class Parser:
         elif value == 1:
             const_name = "@LITERAL_1"
         else:
-            self.error(
+            self._error(
                 "Only 0 or 1 can be used as a signal literal", signal.main_symbol
             )
             return None
@@ -1423,12 +1441,12 @@ class Parser:
             value,
         )
 
-        error_message = self.device_error_message(error_type)
+        error_message = self._device_error_message(error_type)
         if error_message is not None:
             print(
                 "Internal Error: unexpected error when creating literal switch:"
             )  # This should never happen
-            self.error(error_message, signal.main_symbol)
+            self._error(error_message, signal.main_symbol)
             return None
 
         return const_device_id
@@ -1439,7 +1457,7 @@ class Parser:
 
     # Input and output sections ################################################
 
-    def parse_module_ports_list(self):
+    def _parse_module_ports_list(self) -> list[Symbol] | None:
         """Parse one module port-list statement.
 
         EBNF: name_list, ';' (inside an INPUTS or OUTPUTS section).
@@ -1455,39 +1473,39 @@ class Parser:
         the first port name.
 
         """
-        if self.is_section_keyword() or self.symbol.type == self.scanner.EOF:
+        if self._is_section_keyword() or self.symbol.type == self.scanner.EOF:
             return None
 
-        ports_list = self.parse_name_list(expected_name="module port name")
+        ports_list = self._parse_name_list(expected_name="module port name")
         if ports_list is None:
             if self.symbol.type == self.scanner.SEMICOLON:
-                self.advance()
+                self._advance()
             else:
-                self.synchronize()
+                self._synchronize()
 
             return None
 
         if self.symbol.type != self.scanner.SEMICOLON:
             errormsg = "Expected semicolon after module's port list or" \
                        " comma in between list entries."
-            if self.is_keyword_name("OUTPUTS"):
+            if self._is_keyword_name("OUTPUTS"):
                 errormsg += "\nThe INPUTS port list may be malformed or" \
                             " missing a semicolon before OUTPUTS."
-            elif self.is_keyword_name("DEVICES"):
+            elif self._is_keyword_name("DEVICES"):
                 errormsg += "\nThe OUTPUTS port list may be malformed or" \
                             " missing a semicolon before DEVICES."
             else:
-                errormsg += self.section_typo_hint("OUTPUTS")
-                errormsg += self.section_typo_hint("DEVICES")
+                errormsg += self._section_typo_hint("OUTPUTS")
+                errormsg += self._section_typo_hint("DEVICES")
 
-            self.error(errormsg, synchronize=True)
+            self._error(errormsg, synchronize=True)
 
             return None
 
-        self.advance()
+        self._advance()
         return ports_list
 
-    def parse_module_inputs_list(self):
+    def _parse_module_inputs_list(self) -> list[Symbol] | None:
         """Parse the full INPUTS section of a module definition.
 
         Return a list of input port Symbol objects if successful, or None if a structural
@@ -1501,31 +1519,31 @@ class Parser:
         Should be called with self.symbol pointing at the INPUTS keyword. The section
         must be followed by OUTPUTS.
         """
-        if not self.is_keyword_name("INPUTS"):
+        if not self._is_keyword_name("INPUTS"):
             errormsg = "Expected INPUTS section in module definition"
-            errormsg += self.section_typo_hint("INPUTS")
-            self.error(errormsg)
+            errormsg += self._section_typo_hint("INPUTS")
+            self._error(errormsg)
             return None
-        self.advance()
+        self._advance()
 
         inputs_list = []
-        while not self.is_keyword_name("OUTPUTS"):
-            if self.symbol.type == self.scanner.EOF or self.is_section_keyword():
+        while not self._is_keyword_name("OUTPUTS"):
+            if self.symbol.type == self.scanner.EOF or self._is_section_keyword():
                 errormsg = "Incorrect module definition structure - " \
                            "INPUTS section should be followed by OUTPUTS section."
-                errormsg += self.section_typo_hint("OUTPUTS")
-                self.error(errormsg)
+                errormsg += self._section_typo_hint("OUTPUTS")
+                self._error(errormsg)
                 return None
-            ports_list = self.parse_module_ports_list()
+            ports_list = self._parse_module_ports_list()
             if ports_list is None:
-                if self.is_keyword_name("OUTPUTS"):
+                if self._is_keyword_name("OUTPUTS"):
                     # we recovered to the next section already so should stop
                     break
                 return None
             inputs_list.extend(ports_list)
         return inputs_list
 
-    def parse_module_outputs_list(self):
+    def _parse_module_outputs_list(self) -> list[Symbol] | None:
         """Parse the full OUTPUTS section of a module definition.
 
         Return a list of output port Symbol objects if successful, or None if a structural
@@ -1539,24 +1557,24 @@ class Parser:
         Should be called with self.symbol pointing at the OUTPUTS keyword. The section
         must be followed by DEVICES.
         """
-        if not self.is_keyword_name("OUTPUTS"):
+        if not self._is_keyword_name("OUTPUTS"):
             errormsg = "Expected OUTPUTS section in module definition"
-            errormsg += self.section_typo_hint("OUTPUTS")
-            self.error(errormsg)
+            errormsg += self._section_typo_hint("OUTPUTS")
+            self._error(errormsg)
             return None
-        self.advance()
+        self._advance()
 
         outputs_list = []
-        while not self.is_keyword_name("DEVICES"):
-            if self.symbol.type == self.scanner.EOF or self.is_section_keyword():
+        while not self._is_keyword_name("DEVICES"):
+            if self.symbol.type == self.scanner.EOF or self._is_section_keyword():
                 errormsg = "Incorrect module definition structure - " \
                            "OUTPUTS section should be followed by DEVICES section"
-                errormsg += self.section_typo_hint("DEVICES")
-                self.error(errormsg)
+                errormsg += self._section_typo_hint("DEVICES")
+                self._error(errormsg)
                 return None
-            ports_list = self.parse_module_ports_list()
+            ports_list = self._parse_module_ports_list()
             if ports_list is None:
-                if self.is_keyword_name("DEVICES"):
+                if self._is_keyword_name("DEVICES"):
                     # we recovered to the next section already so should stop
                     break
                 return None
@@ -1565,7 +1583,7 @@ class Parser:
 
     # DEVICES section within module #############################################
 
-    def parse_module_device(self, module_definition):
+    def _parse_module_device(self, module_definition: ModuleDefinition) -> bool:
         """Parse one device instantiation inside a module definition.
 
         Arguments:
@@ -1584,7 +1602,7 @@ class Parser:
         Should be called only inside a module DEVICES section, with self.symbol at the
         first symbol of a device statement.
         """
-        device_statement_result = self.parse_device_statement()
+        device_statement_result = self._parse_device_statement()
         if device_statement_result is False:
             return False
         if device_statement_result is None:
@@ -1596,14 +1614,14 @@ class Parser:
         for device_symbol in device_name_list:
             device_id = device_symbol.id
             if device_id in module_definition.device_ids:
-                self.error("Device name already used in this module", device_symbol)
+                self._error("Device name already used in this module", device_symbol)
                 continue
             if (
                 device_id in module_definition.input_ids
                 or device_id in module_definition.output_ids
             ):
                 # The device name is the same as something in INPUTS or OUTPUTS of the module.
-                self.error(
+                self._error(
                     "Module device name conflicts with an input/output port name",
                     device_symbol,
                 )
@@ -1625,7 +1643,7 @@ class Parser:
 
         return True
 
-    def parse_module_devices(self, module_definition):
+    def _parse_module_devices(self, module_definition: ModuleDefinition) -> bool:
         """Parse the DEVICES section inside a module definition.
 
         Arguments:
@@ -1642,21 +1660,21 @@ class Parser:
         Should be called after the module DEVICES keyword has just been consumed.
         """
         while True:
-            if self.is_keyword_name("NETS") or self.is_keyword_name("CONNECT"):
+            if self._is_keyword_name("NETS") or self._is_keyword_name("CONNECT"):
                 return True
-            if self.symbol.type == self.scanner.EOF or self.is_section_keyword():
+            if self.symbol.type == self.scanner.EOF or self._is_section_keyword():
                 errormsg = "Incorrect module definition structure: module"
                 errormsg += " DEVICES section should be followed by NETS or CONNECT section"
-                errormsg += self.section_typo_hint("NETS")
-                errormsg += self.section_typo_hint("CONNECT")
-                self.error(errormsg)
+                errormsg += self._section_typo_hint("NETS")
+                errormsg += self._section_typo_hint("CONNECT")
+                self._error(errormsg)
                 return False
-            if not self.parse_module_device(module_definition):
+            if not self._parse_module_device(module_definition):
                 return False
 
     # NETS section within module ##################################################
 
-    def parse_module_net_declaration(self, module_definition):
+    def _parse_module_net_declaration(self, module_definition: ModuleDefinition) -> bool:
         """Parse one net declaration inside a module definition.
 
         Arguments:
@@ -1675,13 +1693,13 @@ class Parser:
         Should be called only inside a module NETS section, with self.symbol at the
         first net name.
         """
-        net_symbols = self.parse_name_list("module net name")
+        net_symbols = self._parse_name_list("module net name")
 
         if net_symbols is None:
             if self.symbol.type == self.scanner.SEMICOLON:
-                self.advance()
+                self._advance()
             else:
-                self.synchronize()
+                self._synchronize()
             return True
 
         if self.symbol.type != self.scanner.SEMICOLON:
@@ -1690,36 +1708,36 @@ class Parser:
             if self.symbol.type == self.scanner.EQUALS:
                 errormsg += "\nThis looks like a connection statement. "
                 errormsg += "Did you forget the CONNECT section?"
-                errormsg += self.section_typo_hint("CONNECT")
-                self.error(errormsg)
+                errormsg += self._section_typo_hint("CONNECT")
+                self._error(errormsg)
                 return False  # prevent long cascade if we're probably in the wrong section
             elif self.symbol.type == self.scanner.DOT:
                 errormsg = "Net declaration cannot have a port. Is this meant to be a"
                 errormsg += "\nconnection statement? The CONNECT section keyword might be missing."
-                errormsg += self.section_typo_hint("CONNECT")
-                self.error(errormsg)
+                errormsg += self._section_typo_hint("CONNECT")
+                self._error(errormsg)
                 return False  # prevent long cascade if we're probably in the wrong section
-            self.error(errormsg, synchronize=True)
+            self._error(errormsg, synchronize=True)
             return True
 
-        self.advance()
+        self._advance()
 
-        if not self.can_build_network():
+        if not self._can_build_network():
             return True
 
         for net_symbol in net_symbols:
             net_id = net_symbol.id
             if net_id in module_definition.device_ids:
-                self.error("Module net name conflicts with a device name", net_symbol)
+                self._error("Module net name conflicts with a device name", net_symbol)
                 continue
             if (
                 net_id in module_definition.input_ids
                 or net_id in module_definition.output_ids
             ):
-                self.error("Module net name conflicts with a port name", net_symbol)
+                self._error("Module net name conflicts with a port name", net_symbol)
                 continue
             if net_id in module_definition.net_ids:
-                self.error("Module net has already been declared", net_symbol)
+                self._error("Module net has already been declared", net_symbol)
                 continue
 
             # module_data is a ModuleDefinition object, passed by reference to this function
@@ -1728,7 +1746,7 @@ class Parser:
 
         return True
 
-    def parse_module_nets(self, module_definition):
+    def _parse_module_nets(self, module_definition: ModuleDefinition) -> bool:
         """Parse the NETS section inside a module definition.
 
         Arguments:
@@ -1745,26 +1763,26 @@ class Parser:
         Should be called after the module NETS keyword has already been consumed.
         """
         while True:
-            if self.is_keyword_name("CONNECT"):
+            if self._is_keyword_name("CONNECT"):
                 return True
 
-            if self.is_section_keyword():
+            if self._is_section_keyword():
                 errormsg = "Incorrect module definition structure - " \
                            "NETS section should be followed by CONNECT section"
-                errormsg += self.section_typo_hint("CONNECT")
-                self.error(errormsg)
+                errormsg += self._section_typo_hint("CONNECT")
+                self._error(errormsg)
                 return False
 
             if self.symbol.type == self.scanner.EOF:
                 errormsg = "Unexpected end of file in module NETS section"
-                errormsg += self.section_typo_hint("CONNECT")
-                self.error(errormsg)
+                errormsg += self._section_typo_hint("CONNECT")
+                self._error(errormsg)
                 return False
 
-            if not self.parse_module_net_declaration(module_definition):
+            if not self._parse_module_net_declaration(module_definition):
                 return False
 
-    def flatten_module_net_driver_dict(self, module_definition):
+    def _flatten_module_net_driver_dict(self, module_definition: ModuleDefinition) -> bool:
         """Flatten module net drivers to real driving signals.
 
         Arguments:
@@ -1786,17 +1804,17 @@ class Parser:
         for net_id in list(module_definition.net_driver_dict.keys()):
             seen_net_ids = {net_id}
             driver = module_definition.net_driver_dict[net_id]
-            while self.is_module_net(driver, module_definition):
+            while self._is_module_net(driver, module_definition):
                 driver_net_id = driver.main_id
                 if driver_net_id in seen_net_ids:
-                    self.error(
+                    self._error(
                         "Circular definition of module nets detected",
                         driver.main_symbol,
                     )
                     return False
 
                 if driver_net_id not in module_definition.net_driver_dict:
-                    self.error("Module net has no driver", driver.main_symbol)
+                    self._error("Module net has no driver", driver.main_symbol)
                     return False
 
                 seen_net_ids.add(driver_net_id)
@@ -1807,7 +1825,7 @@ class Parser:
 
     # CONNECT section within module ###############################################
 
-    def is_module_net(self, signal, module_definition):
+    def _is_module_net(self, signal: Signal, module_definition: ModuleDefinition) -> bool:
         """Return True if signal is a declared module net without a port."""
         return (
             not signal.is_literal
@@ -1815,7 +1833,7 @@ class Parser:
             and signal.port_id is None
         )
 
-    def module_net_used_with_port(self, signal, module_definition):
+    def _module_net_used_with_port(self, signal: Signal, module_definition: ModuleDefinition) -> bool:
         """Return True if signal uses a declared module net with a port."""
         return (
             not signal.is_literal
@@ -1823,7 +1841,7 @@ class Parser:
             and signal.port_id is not None
         )
 
-    def is_module_output_port(self, signal, module_definition):
+    def _is_module_output_port(self, signal: Signal, module_definition: ModuleDefinition) -> bool:
         """Return True if signal is an output port of a module definition."""
         return (
             not signal.is_literal
@@ -1831,7 +1849,7 @@ class Parser:
             and signal.main_id in module_definition.output_ids
         )
 
-    def is_module_input_port(self, signal, module_definition):
+    def _is_module_input_port(self, signal: Signal, module_definition: ModuleDefinition) -> bool:
         """Return True if signal is an input port of a module definition."""
         return (
             not signal.is_literal
@@ -1839,16 +1857,16 @@ class Parser:
             and signal.main_id in module_definition.input_ids
         )
 
-    def is_module_port(self, signal, module_definition):
+    def _is_module_port(self, signal: Signal, module_definition: ModuleDefinition) -> bool:
         """Return True if signal is an input or output port of a module definition."""
         # Used for within a module definition.
         # If checking if a signal is a port of a module instance in the
         # main circuit, use is_module_instance_port.
-        return self.is_module_input_port(
+        return self._is_module_input_port(
             signal, module_definition
-        ) or self.is_module_output_port(signal, module_definition)
+        ) or self._is_module_output_port(signal, module_definition)
 
-    def module_port_used_with_port(self, signal, module_definition):
+    def _module_port_used_with_port(self, signal: Signal, module_definition: ModuleDefinition) -> bool:
         """Return True if signal uses module port name illegaly with an extra port."""
         return (
             not signal.is_literal
@@ -1859,7 +1877,7 @@ class Parser:
             and signal.port_id is not None
         )
 
-    def parse_module_connect(self, module_definition):
+    def _parse_module_connect(self, module_definition: ModuleDefinition) -> bool:
         """Parse one connection statement inside a module definition.
 
         Arguments:
@@ -1881,30 +1899,30 @@ class Parser:
         """
         # 1. Parse the device EBNF rule (syntax)
 
-        connection_statement = self.parse_connection_statement()
+        connection_statement = self._parse_connection_statement()
         if connection_statement is None:
             return True  # parse_connection_statement guarantees progress before returning None
         input_signal_list, output_signal = connection_statement
 
-        if not self.can_build_network():
+        if not self._can_build_network():
             return True
 
         # 2. Store the connections to be made, and some net semantic checks
         #     (other semantic checks performed during resolve_and_create_connections)
 
-        if self.module_net_used_with_port(output_signal, module_definition):
-            self.error("Net cannot have a port", output_signal.port_symbol)
+        if self._module_net_used_with_port(output_signal, module_definition):
+            self._error("Net cannot have a port", output_signal.port_symbol)
             return True
-        if self.module_port_used_with_port(output_signal, module_definition):
+        if self._module_port_used_with_port(output_signal, module_definition):
             errormsg = (
                 "Module input/output port should not have a pin like '."
                 + self.names.get_name_string(output_signal.port_symbol.id)
                 + "'"
             )
-            self.error(errormsg, output_signal.port_symbol)
+            self._error(errormsg, output_signal.port_symbol)
             return True
-        if self.is_module_output_port(output_signal, module_definition):
-            self.error(
+        if self._is_module_output_port(output_signal, module_definition):
+            self._error(
                 "Module output port cannot be used as a source inside the module definition",
                 output_signal.main_symbol,
             )
@@ -1917,35 +1935,35 @@ class Parser:
             and output_signal.main_id not in module_definition.device_ids
         ):
             errormsg = "Signal name has not been declared in this module"
-            errormsg += self.module_signal_name_typo_hint(
+            errormsg += self._module_signal_name_typo_hint(
                 output_signal.main_id, module_definition
             )
-            self.error(errormsg, output_signal.main_symbol)
+            self._error(errormsg, output_signal.main_symbol)
             return True
 
         # n.b. here "input signal" can refer to the output port of the module definition
         # since internally (within the module) we drive the output port.
         for input_signal in input_signal_list:
-            if not self.can_build_network():
+            if not self._can_build_network():
                 return True
             # If the LHS is a net, we store its RHS in net_driver_dict
             # (RHS can also be a net, this will be flattened with a call
             # to flatten_net_driver_dict during resolve_and_create_connections)
-            if self.module_net_used_with_port(input_signal, module_definition):
-                self.error("Net cannot have a port", input_signal.port_symbol)
+            if self._module_net_used_with_port(input_signal, module_definition):
+                self._error("Net cannot have a port", input_signal.port_symbol)
                 continue
 
-            if self.module_port_used_with_port(input_signal, module_definition):
+            if self._module_port_used_with_port(input_signal, module_definition):
                 errormsg = (
                     "Module input/output port should not have a pin like '."
                     + self.names.get_name_string(input_signal.port_symbol.id)
                     + "'"
                 )
-                self.error(errormsg, input_signal.port_symbol)
+                self._error(errormsg, input_signal.port_symbol)
                 continue
 
             if input_signal.is_literal:
-                self.error(
+                self._error(
                     "Literal (0 or 1) cannot be on LHS of expression",
                     input_signal.main_symbol,
                 )
@@ -1958,21 +1976,21 @@ class Parser:
                 and input_signal.main_id not in module_definition.device_ids
             ):
                 errormsg = "Signal name has not been declared in this module"
-                errormsg += self.module_signal_name_typo_hint(
+                errormsg += self._module_signal_name_typo_hint(
                     input_signal.main_id, module_definition
                 )
-                self.error(errormsg, input_signal.main_symbol)
+                self._error(errormsg, input_signal.main_symbol)
                 continue
 
             # Here we treat the module input/output ports like nets.
-            if self.is_module_net(
+            if self._is_module_net(
                 input_signal, module_definition
-            ) or self.is_module_port(input_signal, module_definition):
+            ) or self._is_module_port(input_signal, module_definition):
                 net_id = input_signal.main_id
                 if input_signal.main_id in module_definition.input_ids:
                     # an input port to the module should be driven from outside - it should NOT be
                     # driven within the module
-                    self.error(
+                    self._error(
                         "Module input port cannot be driven inside the module",
                         input_signal.main_symbol,
                     )
@@ -1980,10 +1998,10 @@ class Parser:
                 if net_id not in module_definition.net_driver_dict:
                     module_definition.net_driver_dict[net_id] = output_signal
                 else:
-                    if self.is_module_net(input_signal, module_definition):
-                        self.error("Net has multiple drivers", input_signal.main_symbol)
+                    if self._is_module_net(input_signal, module_definition):
+                        self._error("Net has multiple drivers", input_signal.main_symbol)
                     else:
-                        self.error(
+                        self._error(
                             "Module port has multiple drivers", input_signal.main_symbol
                         )
                     continue
@@ -1995,7 +2013,7 @@ class Parser:
 
         return True
 
-    def parse_module_connections(self, module_definition):
+    def _parse_module_connections(self, module_definition: ModuleDefinition) -> bool:
         """Parse the CONNECT section inside a module definition.
 
         Arguments:
@@ -2013,24 +2031,24 @@ class Parser:
         Should be called after the module CONNECT keyword has been consumed.
         """
         while True:
-            if self.is_keyword_name("ENDMODULE"):
+            if self._is_keyword_name("ENDMODULE"):
                 return True
 
-            if self.symbol.type == self.scanner.EOF or self.is_section_keyword():
+            if self.symbol.type == self.scanner.EOF or self._is_section_keyword():
                 errormsg = "Incorrect module definition structure: " \
                            "CONNECT section should be followed by ENDMODULE"
-                errormsg += self.section_typo_hint("ENDMODULE")
-                self.error(errormsg)
+                errormsg += self._section_typo_hint("ENDMODULE")
+                self._error(errormsg)
                 return False
 
-            if not self.parse_module_connect(module_definition):
+            if not self._parse_module_connect(module_definition):
                 return False
 
     # Overall module definition ####################################################
 
-    def discard_invalid_module_definition(
-        self, module_name_string, sync_to_module_end=False
-    ):
+    def _discard_invalid_module_definition(
+        self, module_name_string: str, sync_to_module_end: bool = False
+    ) -> bool:
         """Discard an invalid module definition and optionally sync to ENDMODULE.
 
         Arguments:
@@ -2065,22 +2083,22 @@ class Parser:
             + " is invalid due to the above error(s).\n"
         )
         if sync_to_module_end:
-            self.synchronize(["ENDMODULE"])
+            self._synchronize(["ENDMODULE"])
             if self.symbol.type == self.scanner.EOF:
                 return False
-            self.advance()
+            self._advance()
             if self.symbol.type != self.scanner.SEMICOLON:
-                self.error("Missing semicolon after ENDMODULE")
+                self._error("Missing semicolon after ENDMODULE")
             else:
-                self.advance()
-            if self.is_keyword_name("DEVICES") or self.is_keyword_name("MODULE"):
+                self._advance()
+            if self._is_keyword_name("DEVICES") or self._is_keyword_name("MODULE"):
                 return True
             else:
-                self.error("Expected DEVICES section or new MODULE definition.")
+                self._error("Expected DEVICES section or new MODULE definition.")
                 return False
         return True
 
-    def parse_module_definition(self):
+    def _parse_module_definition(self) -> bool:
         """Parse one complete module definition block.
 
         Return True if the parser reaches the end of the module definition, whether or
@@ -2103,32 +2121,32 @@ class Parser:
         # but trying to instantiate this module will fail.
         module_starting_error_count = self.error_count
 
-        self.advance()  # consume the MODULE symbol
+        self._advance()  # consume the MODULE symbol
 
-        module_name_symbol = self.parse_name(expected_name="module name after 'MODULE'")
+        module_name_symbol = self._parse_name(expected_name="module name after 'MODULE'")
         if module_name_symbol is None:
             return False
 
         module_name_string = self.names.get_name_string(module_name_symbol.id)
 
         if module_name_string in self.module_definitions:
-            self.error(
+            self._error(
                 "A module type with this name already exists", module_name_symbol
             )
 
-        module_input_symbols = self.parse_module_inputs_list()
+        module_input_symbols = self._parse_module_inputs_list()
         if module_input_symbols is None:
-            return self.discard_invalid_module_definition(module_name_string, True)
+            return self._discard_invalid_module_definition(module_name_string, True)
 
-        module_output_symbols = self.parse_module_outputs_list()
+        module_output_symbols = self._parse_module_outputs_list()
         if module_output_symbols is None:
-            return self.discard_invalid_module_definition(module_name_string, True)
+            return self._discard_invalid_module_definition(module_name_string, True)
 
         # Check for duplicate input port names
         seen_input_ids = set()
         for input_symbol in module_input_symbols:
             if input_symbol.id in seen_input_ids:
-                self.error("Duplicate module input port name", input_symbol)
+                self._error("Duplicate module input port name", input_symbol)
                 continue
             seen_input_ids.add(input_symbol.id)
 
@@ -2136,10 +2154,10 @@ class Parser:
         seen_output_ids = set()
         for output_symbol in module_output_symbols:
             if output_symbol.id in seen_output_ids:
-                self.error("Duplicate module output port name", output_symbol)
+                self._error("Duplicate module output port name", output_symbol)
                 continue
             if output_symbol.id in seen_input_ids:
-                self.error("Module port cannot be both input and output", output_symbol)
+                self._error("Module port cannot be both input and output", output_symbol)
                 continue
             seen_output_ids.add(output_symbol.id)
 
@@ -2150,54 +2168,54 @@ class Parser:
         # The following function calls add to the module_definition (which is passed as parameter)
         # to add all the ModuleDevice and ModuleConnections.
 
-        if not self.is_keyword_name("DEVICES"):
-            self.error("Expected DEVICES section in module")
-            return self.discard_invalid_module_definition(module_name_string, True)
-        self.advance()
+        if not self._is_keyword_name("DEVICES"):
+            self._error("Expected DEVICES section in module")
+            return self._discard_invalid_module_definition(module_name_string, True)
+        self._advance()
 
-        if not self.parse_module_devices(module_definition):
-            return self.discard_invalid_module_definition(module_name_string, True)
+        if not self._parse_module_devices(module_definition):
+            return self._discard_invalid_module_definition(module_name_string, True)
 
-        if self.is_keyword_name("NETS"):
-            self.advance()
-            if not self.parse_module_nets(module_definition):
-                return self.discard_invalid_module_definition(module_name_string, True)
+        if self._is_keyword_name("NETS"):
+            self._advance()
+            if not self._parse_module_nets(module_definition):
+                return self._discard_invalid_module_definition(module_name_string, True)
 
-        if not self.is_keyword_name("CONNECT"):
-            self.error("Expected CONNECT section in module")
-            return self.discard_invalid_module_definition(module_name_string, True)
-        self.advance()
+        if not self._is_keyword_name("CONNECT"):
+            self._error("Expected CONNECT section in module")
+            return self._discard_invalid_module_definition(module_name_string, True)
+        self._advance()
 
-        if not self.parse_module_connections(module_definition):
-            return self.discard_invalid_module_definition(module_name_string, True)
+        if not self._parse_module_connections(module_definition):
+            return self._discard_invalid_module_definition(module_name_string, True)
 
-        if not self.is_keyword_name("ENDMODULE"):
-            self.error("Expected ENDMODULE after module body")
-            return self.discard_invalid_module_definition(module_name_string, True)
-        self.advance()
+        if not self._is_keyword_name("ENDMODULE"):
+            self._error("Expected ENDMODULE after module body")
+            return self._discard_invalid_module_definition(module_name_string, True)
+        self._advance()
         if self.symbol.type != self.scanner.SEMICOLON:
-            self.error("No semicolon found after ENDMODULE")
+            self._error("No semicolon found after ENDMODULE")
         else:
-            self.advance()  # consume ;
+            self._advance()  # consume ;
 
         if module_starting_error_count > 0:
             # Only doing syntax checks
             return True
 
         if self.error_count > module_starting_error_count:
-            self.discard_invalid_module_definition(module_name_string, False)
+            self._discard_invalid_module_definition(module_name_string, False)
             return True
 
-        if not self.flatten_module_net_driver_dict(module_definition):
+        if not self._flatten_module_net_driver_dict(module_definition):
             return True
 
         # After flattening, go through and check all module outputs are driven
         for output_symbol in module_definition.output_symbols:
             if output_symbol.id not in module_definition.net_driver_dict:
-                self.error("Module output has no driver", output_symbol)
+                self._error("Module output has no driver", output_symbol)
                 continue
         if self.error_count > module_starting_error_count:
-            self.discard_invalid_module_definition(module_name_string, False)
+            self._discard_invalid_module_definition(module_name_string, False)
             return True
 
         self.module_definitions[module_name_string] = module_definition
@@ -2209,7 +2227,7 @@ class Parser:
 
     # Helpers
 
-    def make_internal_name_id_from_instance_id(self, instance_id, local_id):
+    def _make_internal_name_id_from_instance_id(self, instance_id: int, local_id: int) -> int:
         """Return the internal name ID for an instantiated local name.
 
         Arguments:
@@ -2228,7 +2246,7 @@ class Parser:
         internal_name = instance_name + "->" + local_name
         return self.names.lookup([internal_name])[0]
 
-    def map_module_signal_to_instance_signal(self, signal, instance_id):
+    def _map_module_signal_to_instance_signal(self, signal: Signal, instance_id: int) -> Signal:
         """Map a module-local signal to its signal inside one instance.
 
         Arguments:
@@ -2250,7 +2268,7 @@ class Parser:
         if signal.is_literal:
             return signal
 
-        internal_main_id = self.make_internal_name_id_from_instance_id(
+        internal_main_id = self._make_internal_name_id_from_instance_id(
             instance_id,
             signal.main_id,
         )
@@ -2264,7 +2282,7 @@ class Parser:
             port_id=signal.port_id,
         )
 
-    def is_module_instance_port(self, signal):
+    def _is_module_instance_port(self, signal: Signal) -> bool:
         """Return True if signal is a port of an instantiated module."""
         return (
             not signal.is_literal
@@ -2272,7 +2290,7 @@ class Parser:
             and (signal.main_id, signal.port_id) in self.module_instance_ports
         )
 
-    def instantiate_module(self, instance_symbol, module_name_id, instance_id, depth=0):
+    def _instantiate_module(self, instance_symbol: Symbol, module_name_id: int, instance_id: int, depth: int = 0) -> bool:
         """Instantiate a stored module definition into the top-level network.
 
         Return True if the module instance is expanded successfully, or False if an
@@ -2314,7 +2332,7 @@ class Parser:
         # instance_symbol for the purpose of error messages.
 
         if depth > MAX_MODULE_INSTANTIATION_DEPTH:
-            self.error(
+            self._error(
                 "Module hierarchy is too deeply nested",
                 instance_symbol,
             )
@@ -2329,11 +2347,11 @@ class Parser:
             # to use instance_id not instance_symbol.id
             # since otherwise FA1.H1 and FA2.H1 conflict
             # because we're only checking H1
-            self.error("Module instance with this name already exists", instance_symbol)
+            self._error("Module instance with this name already exists", instance_symbol)
             return False
 
         if self.devices.get_device(instance_id) is not None:
-            self.error(
+            self._error(
                 "Module instance name conflicts with an existing device",
                 instance_symbol,
             )
@@ -2341,7 +2359,7 @@ class Parser:
 
         if instance_id in self.net_ids:
             # Likely unnecessary check because DEVICES is before NETS...
-            self.error(
+            self._error(
                 "Module instance name conflicts with an existing net", instance_symbol
             )
             return False
@@ -2356,7 +2374,7 @@ class Parser:
             # get the internal net id, by adding the internal name
             # (e.g. H1->A) to the name table
             # we use the instance_id for this call, the full FA1->HA->A instead of just HA->A
-            internal_input_id = self.make_internal_name_id_from_instance_id(
+            internal_input_id = self._make_internal_name_id_from_instance_id(
                 instance_id, input_id
             )
             # create the net
@@ -2375,7 +2393,7 @@ class Parser:
         for output_id in module_definition.output_ids:
             # get the internal net id, by adding the internal name
             # (e.g. H1->A) to the name table
-            internal_output_id = self.make_internal_name_id_from_instance_id(
+            internal_output_id = self._make_internal_name_id_from_instance_id(
                 instance_id, output_id
             )
             # create the net
@@ -2393,7 +2411,7 @@ class Parser:
 
         # 3. Create the module instance's nets
         for module_net_id in module_definition.net_ids:
-            internal_net_id = self.make_internal_name_id_from_instance_id(
+            internal_net_id = self._make_internal_name_id_from_instance_id(
                 instance_id, module_net_id
             )
             self.net_ids.add(internal_net_id)
@@ -2403,14 +2421,14 @@ class Parser:
             if module_device.kind_type == "module":
                 # nested modules
 
-                nested_instance_id = self.make_internal_name_id_from_instance_id(
+                nested_instance_id = self._make_internal_name_id_from_instance_id(
                     instance_id, module_device.symbol.id
                 )
 
                 # Recursive call to instantiate_module.
                 # e.g. current instance_id corresponds to FA1
                 # nested_instance_id is thus FA1->HA
-                if not self.instantiate_module(
+                if not self._instantiate_module(
                     module_device.symbol,
                     module_device.kind_name,
                     instance_id=nested_instance_id,
@@ -2419,7 +2437,7 @@ class Parser:
                     return False
 
             elif module_device.kind_type == "primitive":
-                internal_device_id = self.make_internal_name_id_from_instance_id(
+                internal_device_id = self._make_internal_name_id_from_instance_id(
                     instance_id, module_device.symbol.id
                 )
 
@@ -2430,9 +2448,9 @@ class Parser:
                     module_device.parameter_value,
                 )
 
-                error_message = self.device_error_message(error_type)
+                error_message = self._device_error_message(error_type)
                 if error_message is not None:
-                    self.error(error_message, module_device.symbol)
+                    self._error(error_message, module_device.symbol)
                     continue
 
                 self.device_declaration_symbols[internal_device_id] = (
@@ -2440,7 +2458,7 @@ class Parser:
                 )
                 self.device_module_names[internal_device_id] = module_name
             else:
-                self.error(
+                self._error(
                     "Internal error: unknown module device kind", module_device.symbol
                 )
                 return False
@@ -2454,10 +2472,10 @@ class Parser:
             # like H1->X1.
             # (the main_symbol and port_symbol still point to the symbol in the
             # module definition for error reporting)
-            mapped_input_signal = self.map_module_signal_to_instance_signal(
+            mapped_input_signal = self._map_module_signal_to_instance_signal(
                 local_input_signal, instance_id
             )
-            mapped_output_signal = self.map_module_signal_to_instance_signal(
+            mapped_output_signal = self._map_module_signal_to_instance_signal(
                 local_output_signal, instance_id
             )
 
@@ -2465,7 +2483,7 @@ class Parser:
             # So we must do the same check as in parse_connect, where if the connect destination
             # is a submodule's input/output port, we resolve it to the internal net signal.
 
-            if self.is_module_instance_port(mapped_output_signal):
+            if self._is_module_instance_port(mapped_output_signal):
                 if (
                     self.module_instance_port_directions[
                         (mapped_output_signal.main_id, mapped_output_signal.port_id)
@@ -2475,7 +2493,7 @@ class Parser:
                     # note self.module_instance_port_directions has all instances,
                     # even the sub-instances,
                     # and the key to the dict is the instance_id, like FA1->HA.
-                    self.error(
+                    self._error(
                         "Module instance's input port cannot be used as a source.",
                         mapped_output_signal.port_symbol,
                     )
@@ -2484,14 +2502,14 @@ class Parser:
                     (mapped_output_signal.main_id, mapped_output_signal.port_id)
                 ]
 
-            if self.is_module_instance_port(mapped_input_signal):
+            if self._is_module_instance_port(mapped_input_signal):
                 if (
                     self.module_instance_port_directions[
                         (mapped_input_signal.main_id, mapped_input_signal.port_id)
                     ]
                     == "output"
                 ):
-                    self.error(
+                    self._error(
                         "Module instance's output port cannot be driven from the outside.",
                         mapped_input_signal.port_symbol,
                     )
@@ -2508,12 +2526,12 @@ class Parser:
             # (so it gets resolved as an internal net, despite
             # not being in the NETS declaration)
 
-            if self.is_net(mapped_input_signal):
+            if self._is_net(mapped_input_signal):
                 net_id = mapped_input_signal.main_id
                 if net_id not in self.net_driver_dict:
                     self.net_driver_dict[net_id] = mapped_output_signal
                 else:
-                    self.error(
+                    self._error(
                         "Net has multiple drivers", mapped_input_signal.main_symbol
                     )
                     return False
@@ -2527,23 +2545,23 @@ class Parser:
             local_net_id,
             local_driving_signal,
         ) in module_definition.net_driver_dict.items():
-            internal_net_id = self.make_internal_name_id_from_instance_id(
+            internal_net_id = self._make_internal_name_id_from_instance_id(
                 instance_id, local_net_id
             )
-            driving_signal = self.map_module_signal_to_instance_signal(
+            driving_signal = self._map_module_signal_to_instance_signal(
                 local_driving_signal, instance_id
             )
 
             # If the net's driving signal is a port of a sub-module, we must resolve
             # it to the internal net signal in the main circuit.
-            if self.is_module_instance_port(driving_signal):
+            if self._is_module_instance_port(driving_signal):
                 if (
                     self.module_instance_port_directions[
                         (driving_signal.main_id, driving_signal.port_id)
                     ]
                     == "input"
                 ):
-                    self.error(
+                    self._error(
                         "Module instance's input port cannot be used as a source.",
                         driving_signal.port_symbol,
                     )
@@ -2556,7 +2574,7 @@ class Parser:
 
         return True
 
-    def check_module_instance_inputs_driven(self):
+    def _check_module_instance_inputs_driven(self) -> bool:
         """Check that every module instance input port has a driver.
 
         Return True if all module instance inputs are driven, or False otherwise.
@@ -2589,7 +2607,7 @@ class Parser:
                 instance_name = self.names.get_name_string(instance_id)
                 port_name = self.names.get_name_string(port_id)
 
-                self.error(
+                self._error(
                     "Module instance input port is not driven: "
                     + instance_name
                     + "."
@@ -2604,7 +2622,7 @@ class Parser:
     # PARSE AND BUILD DEVICES
     #############################################################################################
 
-    def parse_device(self):
+    def _parse_device(self) -> bool:
         """Parse and build one top-level device declaration.
 
         EBNF: device = device_kind, name_list, ';'.
@@ -2628,7 +2646,7 @@ class Parser:
 
         # 1. Parse the device ebnf rule (syntax)
 
-        device_statement_result = self.parse_device_statement()
+        device_statement_result = self._parse_device_statement()
         if device_statement_result is False:
             return False
         if device_statement_result is None:
@@ -2638,7 +2656,7 @@ class Parser:
         )
         module_or_primitive, device_kind_id, device_parameter = device_kind_result
 
-        if not self.can_build_network():
+        if not self._can_build_network():
             return True
 
         # 2. Actually make the device (and semantic checks)
@@ -2649,10 +2667,10 @@ class Parser:
                 # (we already know it's not a reserved keyword)
                 device_name_string = self.names.get_name_string(device_name.id)
                 if device_name_string in self.module_definitions:
-                    self.error("Device name conflicts with a module name", device_name)
+                    self._error("Device name conflicts with a module name", device_name)
                     continue
 
-                if not self.can_build_network():
+                if not self._can_build_network():
                     return True
 
                 error_type = self.devices.make_device(
@@ -2662,7 +2680,7 @@ class Parser:
                 )
 
                 # string for the error message, or None if no error
-                error_message = self.device_error_message(error_type)
+                error_message = self._device_error_message(error_type)
 
                 if error_message is not None:
                     if error_type == self.devices.INVALID_QUALIFIER:
@@ -2670,26 +2688,26 @@ class Parser:
                         # the device kind symbol; otherwise we should point to the device name.
                         # All other errors involving the device kind should have been
                         # caught by parse_device_kind.
-                        self.error(error_message, device_kind_symbol)
+                        self._error(error_message, device_kind_symbol)
                     else:
                         # e.g. DEVICE_PRESENT: duplicate device
-                        self.error(error_message, device_name)
+                        self._error(error_message, device_name)
                     continue
 
                 self.device_declaration_symbols[device_name.id] = device_name
 
         elif (module_or_primitive) == "module":
             for device_name in device_name_list:
-                if not self.can_build_network():
+                if not self._can_build_network():
                     continue
-                if not self.instantiate_module(
+                if not self._instantiate_module(
                     device_name, device_kind_id, device_name.id
                 ):
                     continue
 
         return True
 
-    def parse_devices(self):
+    def _parse_devices(self) -> bool:
         """Parse the top-level DEVICES section.
 
         Return True if parsing reaches NETS or CONNECT. Return False if EOF or an
@@ -2705,25 +2723,25 @@ class Parser:
 
         """
         while True:
-            if self.is_keyword_name("CONNECT") or self.is_keyword_name("NETS"):
+            if self._is_keyword_name("CONNECT") or self._is_keyword_name("NETS"):
                 return True
 
-            if self.symbol.type == self.scanner.EOF or self.is_section_keyword():
+            if self.symbol.type == self.scanner.EOF or self._is_section_keyword():
                 errormsg = "Incorrect structure: DEVICES section should be " \
                            "followed by NETS or CONNECT section."
-                errormsg += self.section_typo_hint("NETS")
-                errormsg += self.section_typo_hint("CONNECT")
-                self.error(errormsg)
+                errormsg += self._section_typo_hint("NETS")
+                errormsg += self._section_typo_hint("CONNECT")
+                self._error(errormsg)
                 return False
 
-            if not self.parse_device():
+            if not self._parse_device():
                 return False
 
     #############################################################################################
     # PARSE AND BUILD CONNECTIONS
     #############################################################################################
 
-    def parse_connect(self):
+    def _parse_connect(self) -> bool:
         """Parse one top-level connection statement.
 
         EBNF: connect = signal_list, '=', signal, ';'.
@@ -2744,21 +2762,21 @@ class Parser:
         """
         # 1. Parse the device EBNF rule (syntax)
 
-        connection_statement = self.parse_connection_statement()
+        connection_statement = self._parse_connection_statement()
         if connection_statement is None:
             return True  # parse connection statement guarantees progress
         input_signal_list, output_signal = connection_statement
 
         # Only proceed beyond syntax checks if we can still build the network,
         # as earlier errors may cause cascading semantic errors
-        if not self.can_build_network():
+        if not self._can_build_network():
             return True
 
         # 2. Store the connections to be made, and some net semantic checks
         #     (other semantic checks performed during resolve_and_create_connections)
 
-        if self.net_used_with_port(output_signal):
-            self.error("Net cannot have a port", output_signal.port_symbol)
+        if self._net_used_with_port(output_signal):
+            self._error("Net cannot have a port", output_signal.port_symbol)
             return True
 
         # If it's a module's output, we need to resolve the signal
@@ -2766,14 +2784,14 @@ class Parser:
         # for example, H1.COUT should be converted to the net signal
         # H1->COUT
 
-        if self.is_module_instance_port(output_signal):
+        if self._is_module_instance_port(output_signal):
             if (
                 self.module_instance_port_directions[
                     (output_signal.main_id, output_signal.port_id)
                 ]
                 == "input"
             ):
-                self.error(
+                self._error(
                     "Module instance's input port cannot be used as a source.",
                     output_signal.port_symbol,
                 )
@@ -2789,12 +2807,12 @@ class Parser:
             and output_signal.main_id in self.module_instance_ids
         ):
             if output_signal.port_id is None:
-                self.error(
+                self._error(
                     "Output port of module instance not specified",
                     output_signal.main_symbol,
                 )
             else:
-                self.error(
+                self._error(
                     "Port '"
                     + output_signal.port_symbol.raw_text
                     + "' does not exist on module instance '"
@@ -2806,32 +2824,32 @@ class Parser:
 
         if (
             not output_signal.is_literal
-            and not self.is_net(output_signal)
+            and not self._is_net(output_signal)
             and self.devices.get_device(output_signal.main_id) is None
         ):
             errormsg = "Signal name does not exist in this network"
-            errormsg += self.signal_name_typo_hint(output_signal.main_id)
-            self.error(errormsg, output_signal.main_symbol)
+            errormsg += self._signal_name_typo_hint(output_signal.main_id)
+            self._error(errormsg, output_signal.main_symbol)
             return True
 
         for input_signal in input_signal_list:
-            if not self.can_build_network():
+            if not self._can_build_network():
                 break
             # If the LHS is a net, we store its RHS in net_driver_dict
             # (RHS can also be a net, this will be flattened with a call
             # to flatten_net_driver_dict during resolve_and_create_connections)
-            if self.net_used_with_port(input_signal):
-                self.error("Net cannot have a port", input_signal.port_symbol)
+            if self._net_used_with_port(input_signal):
+                self._error("Net cannot have a port", input_signal.port_symbol)
                 break
 
-            if self.is_module_instance_port(input_signal):
+            if self._is_module_instance_port(input_signal):
                 if (
                     self.module_instance_port_directions[
                         (input_signal.main_id, input_signal.port_id)
                     ]
                     == "output"
                 ):
-                    self.error(
+                    self._error(
                         "Module instance's output port cannot be driven from the outside.",
                         input_signal.port_symbol,
                     )
@@ -2844,12 +2862,12 @@ class Parser:
 
             elif input_signal.main_id in self.module_instance_ids:
                 if input_signal.port_id is None:
-                    self.error(
+                    self._error(
                         "Module instance input port not specified",
                         input_signal.main_symbol,
                     )
                 else:
-                    self.error(
+                    self._error(
                         "Port '"
                         + input_signal.port_symbol.raw_text
                         + "' does not exist on module instance '"
@@ -2860,27 +2878,27 @@ class Parser:
                 break
 
             if input_signal.is_literal:
-                self.error(
+                self._error(
                     "Literal (0 or 1) cannot be on LHS of expression",
                     input_signal.main_symbol,
                 )
                 break
 
             if (
-                not self.is_net(input_signal)
+                not self._is_net(input_signal)
                 and self.devices.get_device(input_signal.main_id) is None
             ):
                 errormsg = "Net/device name does not exist"
-                errormsg += self.signal_name_typo_hint(input_signal.main_id)
-                self.error(errormsg, input_signal.main_symbol)
+                errormsg += self._signal_name_typo_hint(input_signal.main_id)
+                self._error(errormsg, input_signal.main_symbol)
                 break
 
-            if self.is_net(input_signal):
+            if self._is_net(input_signal):
                 net_id = input_signal.main_id
                 if net_id not in self.net_driver_dict:
                     self.net_driver_dict[net_id] = output_signal
                 else:
-                    self.error("Net has multiple drivers", input_signal.main_symbol)
+                    self._error("Net has multiple drivers", input_signal.main_symbol)
                     break
 
             # Otherwise if LHS is a regular signal we just add it to the
@@ -2890,7 +2908,7 @@ class Parser:
 
         return True
 
-    def check_all_device_inputs_driven(self):
+    def _check_all_device_inputs_driven(self) -> None:
         """Check that every real device input has a source.
 
         Effects:
@@ -2898,7 +2916,7 @@ class Parser:
         error_count for each undriven primitive device input.
 
         """
-        if not self.can_build_network():
+        if not self._can_build_network():
             return
         # Prevent duplicate reporting of undriven primitive device inputs
         # inside a multiple-times-instantiated module
@@ -2935,7 +2953,7 @@ class Parser:
                         # This assumes that the error is internal to the module, because
                         # when called in resolve_and_create_connections, there had already been a
                         # check that all module instance inputs are driven
-                        self.error(
+                        self._error(
                             "Device input is not driven in module "
                             + module_name
                             + ": "
@@ -2947,7 +2965,7 @@ class Parser:
 
                     # If it's just a device in the main circuit
                     else:
-                        self.error(
+                        self._error(
                             "Device input is not driven: "
                             + device_name
                             + "."
@@ -2956,7 +2974,7 @@ class Parser:
                         )
         return
 
-    def check_combinational_loops(self):
+    def _check_combinational_loops(self) -> None:
         """Detect combinational loops using BFS after nets and modules are flattened.
 
         Create a warning if a combinational loop is found. 
@@ -2982,7 +3000,7 @@ class Parser:
         # We already have the stuff we need to build the adjacency list
         # from pending_connections and the flattened net_driver_dict
         for input_signal, output_signal in self.pending_connections:
-            if self.is_net(output_signal):
+            if self._is_net(output_signal):
                 if output_signal.main_id not in self.net_driver_dict:
                     continue
                 output_signal = self.net_driver_dict[output_signal.main_id]
@@ -3032,7 +3050,7 @@ class Parser:
                             device_name = " inside ".join(
                                 reversed(device_name.split("->"))
                             )
-                            self.warning(
+                            self._warning(
                                 "Combinational device self-loop: " + device_name,
                                 hide_location=True,
                             )
@@ -3045,7 +3063,7 @@ class Parser:
                             )
                             errormsg += "       " + device_name + "\n"
 
-                        self.warning(errormsg, hide_location=True)
+                        self._warning(errormsg, hide_location=True)
                         return
 
                     if next_id not in visited:
@@ -3054,7 +3072,7 @@ class Parser:
 
         return
 
-    def resolve_and_create_connections(self):
+    def _resolve_and_create_connections(self) -> None:
         """Resolve all pending connections and create them in the network.
 
         Effects:
@@ -3065,41 +3083,41 @@ class Parser:
 
 
         """
-        if not self.can_build_network():
+        if not self._can_build_network():
             return
 
-        if not self.check_module_instance_inputs_driven():
+        if not self._check_module_instance_inputs_driven():
             return
 
-        if not self.flatten_net_driver_dict():
+        if not self._flatten_net_driver_dict():
             return
 
         # Per feedback in interim session, is now a warning rather than error. 
-        self.check_combinational_loops()
+        self._check_combinational_loops()
         
 
         # TODO net unused / not connected to anything checks
         # may want to keep track of the net instantiation symbols for this
 
         for connection in self.pending_connections:
-            if not self.can_build_network():
+            if not self._can_build_network():
                 break
             input_signal, output_signal = connection
 
             input_device_id = input_signal.main_id
             input_port_id = input_signal.port_id
 
-            if self.is_net(output_signal):
+            if self._is_net(output_signal):
                 net_id = output_signal.main_id
 
                 if net_id not in self.net_driver_dict:
-                    self.error("Net has no driver", output_signal.main_symbol)
+                    self._error("Net has no driver", output_signal.main_symbol)
                     break
 
                 output_signal = self.net_driver_dict[net_id]
 
             if output_signal.is_literal:
-                output_device_id = self.get_or_create_const_switch(output_signal)
+                output_device_id = self._get_or_create_const_switch(output_signal)
                 if output_device_id is None:
                     break
                 output_port_id = None
@@ -3112,7 +3130,7 @@ class Parser:
                 input_device_id, input_port_id, output_device_id, output_port_id
             )
 
-            error_message = self.connection_error_message(connection_error_type)
+            error_message = self._connection_error_message(connection_error_type)
             best_error_symbol = self.symbol  # the best symbol we should point to
             # for the most descriptive error message.
             if error_message is not None:
@@ -3168,14 +3186,14 @@ class Parser:
                         best_error_symbol = output_signal.main_symbol
                     else:
                         best_error_symbol = output_signal.port_symbol
-                self.error(error_message, best_error_symbol)
+                self._error(error_message, best_error_symbol)
                 break
 
-        self.check_all_device_inputs_driven()  # generate an error if not
+        self._check_all_device_inputs_driven()  # generate an error if not
 
         return
 
-    def parse_connections(self):
+    def _parse_connections(self) -> bool:
         """Parse the top-level CONNECT section.
 
         Return True if parsing reaches MONITOR. Return False if EOF or an unexpected
@@ -3191,32 +3209,32 @@ class Parser:
 
         """
         while True:
-            if self.is_keyword_name("MONITOR"):
-                if self.can_build_network():
-                    self.resolve_and_create_connections()
+            if self._is_keyword_name("MONITOR"):
+                if self._can_build_network():
+                    self._resolve_and_create_connections()
                 return True
 
             if self.symbol.type == self.scanner.EOF:
                 errormsg = "Unexpected end of file in CONNECT section - expected MONITOR section"
-                errormsg += self.section_typo_hint("MONITOR")
-                self.error(errormsg)
+                errormsg += self._section_typo_hint("MONITOR")
+                self._error(errormsg)
                 return False
 
-            if self.is_section_keyword():
+            if self._is_section_keyword():
                 errormsg = "Incorrect structure - " \
                            "CONNECT section should be followed by MONITOR section"
-                errormsg += self.section_typo_hint("MONITOR")
-                self.error(errormsg)
+                errormsg += self._section_typo_hint("MONITOR")
+                self._error(errormsg)
                 return False
 
-            if not self.parse_connect():
+            if not self._parse_connect():
                 return False
 
     #############################################################################################
     # PARSE AND BUILD MONITORS
     #############################################################################################
 
-    def parse_monitors(self):
+    def _parse_monitors(self) -> bool:
         """Parse the top-level MONITOR section and create monitors.
 
         Return True if parsing reaches EOF. Return False if the parser becomes
@@ -3239,38 +3257,38 @@ class Parser:
             if self.symbol.type == self.scanner.EOF:
                 break
 
-            if self.is_section_keyword():
-                self.error(
+            if self._is_section_keyword():
+                self._error(
                     "Unexpected section keyword in MONITOR section - "
                     "MONITOR should be the final section"
                 )
                 return False
 
-            monitor_signals = self.parse_signal_list()
+            monitor_signals = self._parse_signal_list()
             if monitor_signals is None:
                 continue
 
             all_monitors_list.extend(monitor_signals)
 
             if self.symbol.type != self.scanner.SEMICOLON:
-                self.error(
+                self._error(
                     "Expected semicolon after monitor definition", synchronize=True
                 )
                 continue
 
-            self.advance()  # consume the semicolon.
+            self._advance()  # consume the semicolon.
 
         # 2. create the monitors and detect semantic errors
 
-        if not self.can_build_network():
+        if not self._can_build_network():
             return True
 
         for monitor_signal in all_monitors_list:
-            if not self.can_build_network():
+            if not self._can_build_network():
                 break
 
             if monitor_signal.is_literal:
-                self.error(
+                self._error(
                     "Cannot monitor a literal 0 or 1", monitor_signal.main_symbol
                 )
                 break
@@ -3293,14 +3311,14 @@ class Parser:
             #   (after this, module instance port is treated like an ordinary net)
             if monitor_signal.main_id in self.module_instance_ids:
                 if monitor_signal.port_id is None:
-                    self.error(
+                    self._error(
                         "Must specify an output port when monitoring a module instance,\n"
                         "or a device with multiple output ports",
                         monitor_signal.main_symbol,
                     )
                     break
-                if not self.is_module_instance_port(monitor_signal):
-                    self.error(
+                if not self._is_module_instance_port(monitor_signal):
+                    self._error(
                         "Port '"
                         + monitor_signal.port_symbol.raw_text
                         + "' does not exist on module instance '"
@@ -3315,7 +3333,7 @@ class Parser:
                     ]
                     == "input"
                 ):
-                    self.error(
+                    self._error(
                         "Cannot monitor a module instance's input port.",
                         monitor_signal.port_symbol,
                     )
@@ -3326,11 +3344,11 @@ class Parser:
                 ]
 
             # Resolve the net reference into the actual device source
-            if self.is_net(monitor_signal):
+            if self._is_net(monitor_signal):
                 net_id = monitor_signal.main_id
 
                 if net_id not in self.net_driver_dict:
-                    self.error("Net has no driver", monitor_signal.main_symbol)
+                    self._error("Net has no driver", monitor_signal.main_symbol)
                     break
 
                 monitor_signal = self.net_driver_dict[net_id]
@@ -3342,7 +3360,7 @@ class Parser:
                 device_id, port_id, requested_name=requested_name
             )
 
-            error_message = self.monitor_error_message(error_type)
+            error_message = self._monitor_error_message(error_type)
             error_symbol = self.symbol
 
             if error_type == self.monitors.MONITOR_PRESENT:
@@ -3351,7 +3369,7 @@ class Parser:
                 else:
                     warning_symbol = requested_signal.port_symbol
 
-                self.warning(
+                self._warning(
                     "Signal is already being monitored: duplicate monitor ignored",
                     warning_symbol,
                 )
@@ -3360,7 +3378,7 @@ class Parser:
                 device = self.devices.get_device(device_id)
                 if device is None:
                     error_message = "Specified name does not match a device or net"
-                    error_message += self.signal_name_typo_hint(
+                    error_message += self._signal_name_typo_hint(
                         requested_signal.main_id
                     )
                     error_symbol = requested_signal.main_symbol
@@ -3377,7 +3395,7 @@ class Parser:
                 else:
                     error_symbol = requested_signal.port_symbol
 
-                self.error(error_message, error_symbol)
+                self._error(error_message, error_symbol)
                 break
 
         return True
@@ -3386,7 +3404,7 @@ class Parser:
     # PARSING: FULL NETWORK (TOP LEVEL FUNCTIONS)
     #############################################################################################
 
-    def parse_network(self):
+    def parse_network(self) -> bool:
         """Parse the full circuit definition file and build the network.
 
         Return True if parsing finishes with no errors, and False otherwise.
@@ -3400,78 +3418,78 @@ class Parser:
         """
         try:
             # self.symbol starts on None, advance it once to get the first symbol
-            self.advance()
+            self._advance()
 
-            while self.is_keyword_name("MODULE"):
-                if not self.parse_module_definition():
-                    self.fatal_error()
+            while self._is_keyword_name("MODULE"):
+                if not self._parse_module_definition():
+                    self._fatal_error()
                     return False
-                if self.is_keyword_name("MODULE"):
+                if self._is_keyword_name("MODULE"):
                     continue
-                elif self.is_keyword_name("DEVICES"):
+                elif self._is_keyword_name("DEVICES"):
                     break
                 else:
                     # and next keyword isn't MODULE or DEVICES: fatal error
                     errormsg = "Expected DEVICES section or new MODULE definition."
-                    errormsg += self.section_typo_hint("DEVICES")
-                    errormsg += self.section_typo_hint("MODULE")
-                    self.error(errormsg)
-                    self.fatal_error()
+                    errormsg += self._section_typo_hint("DEVICES")
+                    errormsg += self._section_typo_hint("MODULE")
+                    self._error(errormsg)
+                    self._fatal_error()
                     return False
 
-            if self.is_keyword_name("DEVICES"):
-                self.advance()
+            if self._is_keyword_name("DEVICES"):
+                self._advance()
 
-                if not self.parse_devices():
-                    self.fatal_error()
+                if not self._parse_devices():
+                    self._fatal_error()
                     return False
             else:
                 errormsg = "Expected DEVICES section or new MODULE definition."
-                errormsg += self.section_typo_hint("DEVICES")
-                errormsg += self.section_typo_hint("MODULE")
-                self.error(errormsg)
-                self.fatal_error()
+                errormsg += self._section_typo_hint("DEVICES")
+                errormsg += self._section_typo_hint("MODULE")
+                self._error(errormsg)
+                self._fatal_error()
                 return False
 
-            if self.is_keyword_name("NETS"):
-                self.advance()
+            if self._is_keyword_name("NETS"):
+                self._advance()
 
-                if not self.parse_nets():
-                    self.fatal_error()
+                if not self._parse_nets():
+                    self._fatal_error()
                     return False
 
-            if self.is_keyword_name("CONNECT"):
-                self.advance()
+            if self._is_keyword_name("CONNECT"):
+                self._advance()
 
-                if not self.parse_connections():
-                    self.fatal_error()
+                if not self._parse_connections():
+                    self._fatal_error()
                     return False
             else:
                 errormsg = "CONNECT section not found after DEVICES section"
-                errormsg += self.section_typo_hint("CONNECT")
-                self.error(errormsg)
-                self.fatal_error()
+                errormsg += self._section_typo_hint("CONNECT")
+                self._error(errormsg)
+                self._fatal_error()
                 return False
 
-            if self.is_keyword_name("MONITOR"):
-                self.advance()
+            if self._is_keyword_name("MONITOR"):
+                self._advance()
 
-                if not self.parse_monitors():
-                    self.fatal_error()
+                if not self._parse_monitors():
+                    self._fatal_error()
                     return False
             else:
                 errormsg = "MONITOR section not found after CONNECT section"
-                errormsg += self.section_typo_hint("MONITOR")
-                self.error(errormsg, synchronize=True)
-                self.fatal_error()
+                errormsg += self._section_typo_hint("MONITOR")
+                self._error(errormsg, synchronize=True)
+                self._fatal_error()
                 return False
 
             if self.symbol.type != self.scanner.EOF:
-                self.error(
+                self._error(
                     "Expected end of file - MONITOR section should be the final section",
                     synchronize=True,
                 )
-                self.fatal_error()
+                self._fatal_error()
                 return False
 
             if self.error_count == 0:
@@ -3532,7 +3550,7 @@ class Parser:
             # FALLBACK ERROR MESSAGE - This should hopefully not ever be seen by the user!
             print("---------------------------------------------------------------")
             try:
-                self.error(
+                self._error(
                     "An unexpected error occurred - "
                     "please check the definition file")
                 print(
