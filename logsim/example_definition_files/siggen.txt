@@ -1,4 +1,4 @@
-/* An 8-to-1 MUX, using S2 S1 S0 as a 3-bit select signal */
+(* An 8-to-1 MUX, using S2 S1 S0 as a 3-bit select signal *)
 MODULE MUX8
     INPUTS A, B, C, D, E, F, G, H, S0, S1, S2;
     OUTPUTS Y;
@@ -29,7 +29,7 @@ MODULE MUX8
 
 ENDMODULE;
 
-/* Top-Level Circuit */ 
+(* Top-Level Circuit *)
 DEVICES
     SWITCH(0) S0;
     SWITCH(0) S1;

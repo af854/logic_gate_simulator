@@ -58,20 +58,22 @@ class ModuleDevice:
     or an instantiation of another user-defined module.
     """
 
-    def __init__(self, symbol, kind_type, kind_name, parameter_value):
+    def __init__(self, symbol, kind_type, kind_name, parameter_value, kind_symbol = None):
         """Initialise a ModuleDevice object.
 
         Arguments:
         symbol -- Symbol object for the device instance name.
         kind_type -- string identifying the kind as "primitive" or "module".
-        kind_name -- name of the primitive device or module being instantiated.
+        kind_name -- name ID of the primitive device or module being instantiated.
         parameter_value -- integer parameter value for parameterised primitive
             devices, or None if no parameter is used.
+        kind_symbol -- Symbol object for device kind or module type 
         """
         self.symbol = symbol
         self.kind_type = kind_type      # "primitive" or "module"
-        self.kind_name = kind_name      # e.g. "AND" or another module name
+        self.kind_name = kind_name      # e.g. ID for "AND" or another module name
         self.parameter_value = parameter_value
+        self.kind_symbol = kind_symbol
 
 class ModuleDefinition:
     """Store all parser information for one module definition.

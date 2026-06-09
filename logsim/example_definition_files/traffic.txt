@@ -20,19 +20,11 @@
 # BASIC MODULES 
 ##################################################
 
-(* Not gate using a NAND gate *)
-MODULE NOT_GATE
-    INPUTS
-        IN;
-    OUTPUTS
-        OUT;
-    DEVICES
-        NAND(2) N;
-    CONNECT
-        N.I1 = IN;
-        N.I2 = IN;
-        OUT = N;
-ENDMODULE;
+(*
+   Note: modules can now be defined out-of-order.
+   For example, MUX2 uses NOT_GATE even though NOT_GATE
+   is defined later. 
+*)
 
 (* 2-to-1 MUX: Y = SEL ? B : A *)
 MODULE MUX2
@@ -59,6 +51,21 @@ MODULE MUX2
         O1.I1 = A_PATH;
         O1.I2 = B_PATH;
         Y = O1;
+ENDMODULE;
+
+(* Not gate using a NAND gate. *)
+
+MODULE NOT_GATE
+    INPUTS
+        IN;
+    OUTPUTS
+        OUT;
+    DEVICES
+        NAND(2) N;
+    CONNECT
+        N.I1 = IN;
+        N.I2 = IN;
+        OUT = N;
 ENDMODULE;
 
 (* 1-Bit Half Adder *) 

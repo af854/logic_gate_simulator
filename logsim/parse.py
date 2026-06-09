@@ -1000,53 +1000,31 @@ class Parser:
         device_kind_id is the module name ID and device_parameter is None. Return None
         on error.
 
+        Any name is assumed to be a module type. Checks for whether the module exists
+        is now done later in _check_module_dependencies, to allow modules to be defined
+        out-of-order, or in _parse_device for top level modules. 
+
         Effects:
         Consumes the device kind and any parameter if successful. On error, prints an
         error message, increments error_count, and synchronizes.
 
         Restrictions:
         Should be called with self.symbol at the device kind in a device statement.
-        Module device kinds must already have been defined, unless parsing is already
-        in syntax-check-only mode after an earlier error.
         """
         # When called should point to the symbol for the device keyword (like AND, SWITCH)
 
         if self.symbol.type == self.scanner.NAME:
-            # Then it should be a module name
-            module_name_string = self._symbol_string()
-
-            if (
-                module_name_string in self.module_definitions
-                or not self._can_build_network()
-            ):
-                # if we can't build the network, syntax check only
-                module_name_id = self.symbol.id
-                self._advance()
-                # Now we're pointing at the next symbol
-                # check that it's not ( for a more helpful error message
-                # (otherwise we get error message expected a name)
-                if self.symbol.type == self.scanner.L_BRACKET:
-                    self._error(
-                        "Module type should not have parentheses", synchronize=True
-                    )
-                    return None
-                return "module", module_name_id, None
-
-            # We've got a name that's not a module type
-            # Display a relevant error msg
-            errormsg = "Expected primitive device type (e.g. AND) " \
-                       "or previously-defined module name"
-
-            errormsg += self._device_kind_typo_hint(self.symbol.id)
-            errormsg += self._section_typo_hint("NETS")
-
-            if self._device_exists(self.symbol):
-                errormsg += "\nAre you trying to connect a device? "
-                errormsg += "This should be done in the CONNECT section."
-                errormsg += self._section_typo_hint("CONNECT")
-
-            self._error(errormsg, synchronize=True)
-            return None
+            module_name_id = self.symbol.id
+            self._advance()
+            # Now we're pointing at the next symbol
+            # check that it's not ( for a more helpful error message
+            # (otherwise we get error message expected a name)
+            if self.symbol.type == self.scanner.L_BRACKET:
+                self._error(
+                    "Module type should not have parentheses", synchronize=True
+                )
+                return None
+            return "module", module_name_id, None
 
         if self._is_parameterised_device():
             device_kind_id = self.symbol.id
@@ -1067,22 +1045,22 @@ class Parser:
                 # for SIGGEN we store it as a string so leading 0s are kept
             else:
                 device_parameter = self.symbol.id            
-                
+                    
             self._advance()  # consume the parameter
 
             if device_kind_id in [self.devices.CLOCK, self.devices.RC] and device_parameter < 1:
                 self._error("Invalid device parameter: should be 1 or greater",
-                           parameter_symbol, synchronize=True)
+                        parameter_symbol, synchronize=True)
                 return None
             if device_kind_id in self.devices.gate_types and not 1 <= device_parameter <= 16:
                 self._error("Invalid device parameter: should be between 1 and 16",
-                           parameter_symbol, synchronize=True)
+                        parameter_symbol, synchronize=True)
                 return None
             if device_kind_id == self.devices.SWITCH and device_parameter not in [0, 1]:
                 self._error("Invalid device parameter: should be 0 or 1",
-                           parameter_symbol, synchronize=True)
+                        parameter_symbol, synchronize=True)
                 return None
-            
+                
             if device_kind_id == self.devices.SIGGEN:
                 siggen_param_ok = True
                 if device_parameter is None:
@@ -1094,9 +1072,9 @@ class Parser:
                         siggen_param_ok = False
                 if not siggen_param_ok:
                     self._error("Invalid SIGGEN parameter: "
-                               "should be a binary pattern containing only 0 and 1",
-                               parameter_symbol,
-                               synchronize=True,
+                            "should be a binary pattern containing only 0 and 1",
+                            parameter_symbol,
+                            synchronize=True,
                     )
                     return None
 
@@ -1118,10 +1096,14 @@ class Parser:
                 return None
             return "primitive", device_kind_id, None
 
-        self._error(
-            "Invalid device kind: '" + self.symbol.raw_text + "'.",
-            synchronize=True,
-        )        
+        errormsg = "Invalid device kind: '" + self.symbol.raw_text + "'."
+
+        if self._device_exists(self.symbol):
+            errormsg += "\nAre you trying to connect a device? "
+            errormsg += "This should be done in the CONNECT section."
+            errormsg += self._section_typo_hint("CONNECT")
+
+        self._error(errormsg, synchronize=True)        
         return None
 
     def _parse_device_statement(self) -> DeviceStatementResult | None | bool:
@@ -1607,7 +1589,7 @@ class Parser:
             return False
         if device_statement_result is None:
             return True
-        _device_kind_symbol, device_kind_result, device_name_list = (
+        device_kind_symbol, device_kind_result, device_name_list = (
             device_statement_result
         )
 
@@ -1638,6 +1620,10 @@ class Parser:
                     device_kind_result[1],
                     # primitive parameter (e.g. input size), or None for module
                     device_kind_result[2],
+                    # The symbol for the module type, e.g. HALF_ADDER, stored because
+                    # now checks for validity take place later to allow out-of-order
+                    # module defs
+                    device_kind_symbol,
                 )
             )
 
@@ -2111,8 +2097,7 @@ class Parser:
         error_count, flatten module net drivers, and discard invalid module definitions.
 
         Restrictions:
-        Should be called with self.symbol pointing at the MODULE keyword. A module may
-        instantiate only module types that have already been defined.
+        Should be called with self.symbol pointing at the MODULE keyword. 
         """
         # We want to store the ModuleDefinition only if the module
         # has no errors. Hence we store the error_count at the start
@@ -2289,6 +2274,83 @@ class Parser:
             and signal.port_id is not None
             and (signal.main_id, signal.port_id) in self.module_instance_ports
         )
+    
+    def _check_module_dependencies(self) -> None:
+        """Check that all module types in module definitions exist and dependencies are acyclic.
+
+        Returns None. 
+        
+        Effects: Raises errors and increments self.error_count if a module type doesn't
+        exist or if a cycle is found. 
+        """
+        ## Stage 1; Go through all module instantiations, check that their 
+        #  instantiated sub-modules are all valid/defined, and build a graph
+
+        no_undefined_modules = True
+        
+        # Adjacenty list module_name_string -> 
+        # list of tuples (refernced module_name_string, symbol_to_report)
+        graph = {}
+
+        for module_name, module_definition in self.module_definitions.items():
+            graph[module_name] = []
+
+            for module_device in module_definition.devices:
+                if module_device.kind_type != "module":
+                    continue
+
+                referenced_module_name = self.names.get_name_string(module_device.kind_name)
+
+                if referenced_module_name not in self.module_definitions:
+                    errormsg = (
+                        "Module type '"
+                        + referenced_module_name
+                        + "' does not exist\n       (used in the definition of '"
+                        + module_name
+                        + "')."
+                    )
+                    errormsg += self._device_kind_typo_hint(module_device.kind_name)
+                    self._error(errormsg, module_device.kind_symbol)
+                    no_undefined_modules = False
+                    continue
+                graph[module_name].append((referenced_module_name, module_device.kind_symbol))
+
+        if not no_undefined_modules:
+            return
+
+        ## Stage 2: Run DFS to detect cyclic definition dependencies
+
+        visited = set()
+
+        def dfs(module_name, stack):
+            stack.append(module_name)
+
+            for next_module_name, symbol in graph[module_name]:
+                if next_module_name in stack:
+                    cycle_start_index = stack.index(next_module_name)
+                    cycle = stack[cycle_start_index:] + [next_module_name]
+
+                    errormsg = "Recursive module instantiation detected: "
+                    errormsg += " -> ".join(cycle)
+                    self._error(errormsg, symbol)
+                    return
+
+                if next_module_name not in visited:
+                    dfs(next_module_name, stack)
+                    if not self._can_build_network():
+                        return
+
+            stack.pop()
+            visited.add(module_name)
+
+        for module_name in graph:
+            if module_name not in visited:
+                dfs(module_name, [])
+                # Early return to prevent same cycle from
+                # producing multiple error msgs
+                if not self._can_build_network():
+                    return
+        return
 
     def _instantiate_module(self, instance_symbol: Symbol, module_name_id: int, instance_id: int, depth: int = 0) -> bool:
         """Instantiate a stored module definition into the top-level network.
@@ -2696,7 +2758,17 @@ class Parser:
 
                 self.device_declaration_symbols[device_name.id] = device_name
 
-        elif (module_or_primitive) == "module":
+        elif module_or_primitive == "module":
+            module_name = self.names.get_name_string(device_kind_id)
+            # Since allowing modules to be defined out of order, _parse_device_kind
+            # no longer checks module name validity, so we check it here for top-level
+            # modules.
+            if module_name not in self.module_definitions:
+                errormsg = "Module type has not been defined: " + module_name
+                errormsg += self._device_kind_typo_hint(device_kind_id)
+                self._error(errormsg, device_kind_symbol)
+                return True
+
             for device_name in device_name_list:
                 if not self._can_build_network():
                     continue
@@ -3077,10 +3149,10 @@ class Parser:
 
         Effects:
         If network building is still allowed, checks module instance inputs, flattens
-        net drivers, checks combinational loops, resolves literals into artificial
-        SWITCH devices, calls network.make_connection for each pending connection, and
+        net drivers, resolves literals into artificial SWITCH devices,
+        calls network.make_connection for each pending connection, 
+        checks for combinational loops and issues a warning if any is found, and
         checks all device inputs are driven. May print errors and increment error_count.
-
 
         """
         if not self._can_build_network():
@@ -3092,9 +3164,6 @@ class Parser:
         if not self._flatten_net_driver_dict():
             return
 
-        # Per feedback in interim session, is now a warning rather than error. 
-        self._check_combinational_loops()
-        
 
         # TODO net unused / not connected to anything checks
         # may want to keep track of the net instantiation symbols for this
@@ -3189,6 +3258,9 @@ class Parser:
                 self._error(error_message, best_error_symbol)
                 break
 
+        if self._can_build_network():
+            # Per feedback in interim session, is now a warning rather than error. 
+            self._check_combinational_loops()
         self._check_all_device_inputs_driven()  # generate an error if not
 
         return
@@ -3436,6 +3508,8 @@ class Parser:
                     self._error(errormsg)
                     self._fatal_error()
                     return False
+            if self._can_build_network():
+                self._check_module_dependencies()
 
             if self._is_keyword_name("DEVICES"):
                 self._advance()

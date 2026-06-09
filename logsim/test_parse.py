@@ -790,17 +790,21 @@ def test_parse_device_kind_module_parens_error(parser_env):
     p._parse_device_kind()
     p._error.assert_called()
 
-
-def test_parse_device_kind_invalid_typo_connect(parser_env):
+def test_parse_device_kind_name_treated_as_module(parser_env):
     p = parser_env
     p._error = MagicMock()
     p._is_parameterised_device = MagicMock(return_value=False)
     p._is_fixed_device = MagicMock(return_value=False)
-    p.devices.get_device = MagicMock(return_value=True)  # Matches instantiated device
+    p.devices.get_device = MagicMock(return_value=True)
     set_stream(p, [DummySymbol(p.scanner.NAME, 1)])
-    p._parse_device_kind()
-    p._error.assert_called()
 
+    res = p._parse_device_kind()
+    # After updating for allowing out of order module definitions
+    # _parse_device_kind now doesn't do semantic check of
+    # whether a name is a real module - this check is left for
+    # _parse_device for top level or _check_module_dependencies.
+    assert res == ("module", 1, None)
+    p._error.assert_not_called()
 
 def test_parse_device_statement_valid(parser_env):
     p = parser_env
@@ -1950,6 +1954,7 @@ def test_parse_device_primitive_invalid_qualifier(parser_env):
 
 def test_parse_device_module(parser_env):
     p = parser_env
+    p.module_definitions = {"MOCKED_NAME": MagicMock()}
     p._instantiate_module = MagicMock()
     p._parse_device_statement = MagicMock(
         return_value=(
@@ -1960,6 +1965,24 @@ def test_parse_device_module(parser_env):
     )
     p._parse_device()
     p._instantiate_module.assert_called()
+
+def test_parse_device_module_undefined(parser_env):
+    p = parser_env
+    p._error = MagicMock()
+    p._instantiate_module = MagicMock()
+    p.module_definitions = {}
+    p._parse_device_statement = MagicMock(
+        return_value=(
+            DummySymbol(p.scanner.NAME, 99),
+            ("module", 99, None),
+            [DummySymbol(p.scanner.NAME, 2)],
+        )
+    )
+
+    p._parse_device()
+
+    p._error.assert_called()
+    p._instantiate_module.assert_not_called()
 
 
 def test_parse_devices_loop_terminates(parser_env):
