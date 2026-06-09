@@ -209,6 +209,7 @@ CYCLE_SPIN_WIDTH = 88
 SIDE_PANEL_WIDTH = 180
 SIMULATION_PANEL_WIDTH = 210
 SIMULATION_PANEL_HEIGHT = 230
+RESET_VIEW_BUTTON_WIDTH = 106
 MODULE_NESTED_INDENT_WIDTH = 12
 MODULE_SIGNAL_INDENT_WIDTH = 16
 SIGNAL_ACTION_BUTTON_SIZE = 18
@@ -285,6 +286,12 @@ LIGHT_REDO_ICON_PATH = os.path.join(
     os.path.dirname(__file__), "icons", "redo_light.png"
 )
 DARK_REDO_ICON_PATH = os.path.join(os.path.dirname(__file__), "icons", "redo_dark.png")
+LIGHT_INSPECTOR_ICON_PATH = os.path.join(
+    os.path.dirname(__file__), "icons", "inspector_light.png"
+)
+DARK_INSPECTOR_ICON_PATH = os.path.join(
+    os.path.dirname(__file__), "icons", "inspector_dark.png"
+)
 LIGHT_PLAY_ICON_PATH = os.path.join(
     os.path.dirname(__file__), "icons", "play_light.png"
 )
@@ -403,6 +410,9 @@ class MyGLCanvas(wxcanvas.GLCanvas):
         self.cycle_inspector_index = 0
         self.waveform_layout = {"start_x": 0, "step": 20, "trace_length": 0}
         self.render_size_override = None
+        self.no_monitor_label = wx.StaticText(self, label="", pos=(10, 10))
+        self.no_monitor_label.Hide()
+        self.apply_no_monitor_label_theme()
 
         # Bind events to the canvas
         self.Bind(wx.EVT_PAINT, self.on_paint)
@@ -470,13 +480,19 @@ class MyGLCanvas(wxcanvas.GLCanvas):
         size = self.get_render_size()
 
         if not self.monitors.monitors_dictionary:
-            self.render_text(
-                "No monitor signals to display.",
-                10,
-                size.height - 30,
-                colour=self.theme["canvas_text"],
-            )
+            no_monitor_text = _("No monitor signals to display.")
+            if any("\u0600" <= character <= "\u06ff" for character in no_monitor_text):
+                self.show_no_monitor_label(no_monitor_text)
+            else:
+                self.no_monitor_label.Hide()
+                self.render_text(
+                    no_monitor_text,
+                    10,
+                    size.height - 30,
+                    colour=self.theme["canvas_text"],
+                )
         else:
+            self.no_monitor_label.Hide()
             display_rows = self.get_monitor_display_rows()
             layout = self.get_waveform_layout(display_rows)
             display_height = layout["display_height"]
@@ -877,6 +893,29 @@ class MyGLCanvas(wxcanvas.GLCanvas):
                 GL.glRasterPos2f(x_pos, y_pos)
             else:
                 GLUT.glutBitmapCharacter(font, ord(character))
+
+    def show_no_monitor_label(self, text):
+        """Show the empty-canvas message using normal wx text."""
+        self.no_monitor_label.SetLabel(text)
+        self.no_monitor_label.SetPosition((10, 10))
+        self.no_monitor_label.SetLayoutDirection(wx.Layout_RightToLeft)
+        self.no_monitor_label.SetSize(self.no_monitor_label.GetBestSize())
+        self.no_monitor_label.Show()
+        self.no_monitor_label.Raise()
+
+    def apply_no_monitor_label_theme(self):
+        """Match the empty-canvas message to the canvas colours."""
+        self.no_monitor_label.SetForegroundColour(
+            self.opengl_colour_to_wx_colour(self.theme["canvas_text"])
+        )
+        self.no_monitor_label.SetBackgroundColour(
+            self.opengl_colour_to_wx_colour(self.theme["canvas_bg"])
+        )
+
+    def opengl_colour_to_wx_colour(self, colour):
+        """Convert an OpenGL RGB tuple into a wx colour."""
+        red, green, blue = colour
+        return wx.Colour(int(red * 255), int(green * 255), int(blue * 255))
 
     def get_canvas_label_text(self, label_text, start_x):
         """Shorten a signal label before it overlaps the waveform area."""
@@ -1479,8 +1518,17 @@ class Gui(wx.Frame):
         self.redo_button = wxbuttons.GenBitmapButton(
             self, wx.ID_ANY, wx.Bitmap(1, 1), size=(28, 28), style=wx.BORDER_NONE
         )
+        self.reset_view_button = wx.Button(
+            self, wx.ID_ANY, _("Reset view"), size=(RESET_VIEW_BUTTON_WIDTH, 28)
+        )
+        self.cycle_inspector_button = wxbuttons.GenBitmapButton(
+            self, wx.ID_ANY, wx.Bitmap(1, 1), size=(28, 28), style=wx.BORDER_NONE
+        )
         self.undo_button.SetMinSize((28, 28))
         self.redo_button.SetMinSize((28, 28))
+        self.reset_view_button.SetMinSize((RESET_VIEW_BUTTON_WIDTH, 28))
+        self.reset_view_button.SetMaxSize((RESET_VIEW_BUTTON_WIDTH, 28))
+        self.cycle_inspector_button.SetMinSize((28, 28))
         self.switch_rows = wx.ScrolledWindow(
             self, wx.ID_ANY, style=wx.VSCROLL | wx.BORDER_SIMPLE
         )
@@ -1545,6 +1593,8 @@ class Gui(wx.Frame):
         )
         self.undo_button.Bind(wx.EVT_BUTTON, self.on_undo_cycle)
         self.redo_button.Bind(wx.EVT_BUTTON, self.on_redo_cycle)
+        self.reset_view_button.Bind(wx.EVT_BUTTON, self.on_reset_view)
+        self.cycle_inspector_button.Bind(wx.EVT_BUTTON, self.on_cycle_inspector_button)
 
         self.Bind(wx.EVT_MENU, self.on_run_cycles_button, id=ID_RUN)
         self.Bind(wx.EVT_MENU, self.on_run_one_cycle, id=ID_RUN_ONE)
@@ -1706,11 +1756,19 @@ class Gui(wx.Frame):
 
         self.undo_button.Reparent(self)
         self.redo_button.Reparent(self)
+        self.reset_view_button.Reparent(self)
+        self.cycle_inspector_button.Reparent(self)
         history_theme_sizer.Add(
             self.undo_button, 0, wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, 4
         )
         history_theme_sizer.Add(
-            self.redo_button, 0, wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, 8
+            self.redo_button, 0, wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, 4
+        )
+        history_theme_sizer.Add(
+            self.reset_view_button, 0, wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, 4
+        )
+        history_theme_sizer.Add(
+            self.cycle_inspector_button, 0, wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, 8
         )
         history_theme_sizer.AddStretchSpacer()
         side_sizer.Add(history_theme_sizer, 0, wx.EXPAND | wx.BOTTOM, 8)
@@ -1768,16 +1826,18 @@ class Gui(wx.Frame):
     def on_help(self, event):
         """Show the quick-start workflow for loading and simulating a circuit."""
         wx.MessageBox(
-            "1. Open a circuit definition file from File > Open.\n"
-            "2. Use the Switches panel to set switch inputs LOW or HIGH.\n"
-            "3. Add signals from the Available signals panel to display them.\n"
-            "4. Choose the number of cycles to run and click Run cycles.\n"
-            "5. Use Play live to advance the trace one cycle at a time.\n"
-            "6. Use Clear traces to clear the waveform history without "
-            "resetting switches.\n"
-            "7. Use Reset simulation to restart the circuit and clear all traces.\n"
-            "8. Export the waveform as PNG or the trace data as CSV from the "
-            "Export menu.",
+            _(
+                "1. Open a circuit definition file from File > Open.\n"
+                "2. Use the Switches panel to set switch inputs LOW or HIGH.\n"
+                "3. Add signals from the Available signals panel to display them.\n"
+                "4. Choose the number of cycles to run and click Run cycles.\n"
+                "5. Use Play live to advance the trace one cycle at a time.\n"
+                "6. Use Clear traces to clear the waveform history without "
+                "resetting switches.\n"
+                "7. Use Reset simulation to restart the circuit and clear all traces.\n"
+                "8. Export the waveform as PNG or the trace data as CSV from the "
+                "Export menu."
+            ),
             _("Quick Start"),
             wx.ICON_INFORMATION | wx.OK,
         )
@@ -1785,30 +1845,32 @@ class Gui(wx.Frame):
     def on_keyboard_shortcuts_help(self, event):
         """Show all keyboard shortcuts registered by the accelerator table."""
         wx.MessageBox(
-            "F1: Quick start help\n"
-            "Space: Run the selected number of cycles\n"
-            "Right arrow: Run one cycle\n"
-            "Ctrl+Space: Play or pause live tracing\n"
-            "Ctrl+Z: Undo one cycle\n"
-            "Ctrl+Y: Redo one cycle\n"
-            "Ctrl+O: Open a circuit file\n"
-            "Ctrl+=: Zoom in\n"
-            "Ctrl+-: Zoom out\n"
-            "Ctrl+I: Show or hide cycle inspector\n"
-            "Ctrl+Shift+P: Export waveform as PNG\n"
-            "Ctrl+Shift+E: Export traces as CSV\n"
-            "F: Snap the 3D view to the front\n"
-            "R: Reset view\n"
-            "B: Cycle the 3D trace background display mode\n"
-            "Drag: Orbit the 3D view\n"
-            "Shift+Drag: Pan the 3D view\n"
-            "Scroll: Zoom the 3D view\n"
-            "Ctrl+1: Show Available Signals panel\n"
-            "Ctrl+2: Show Simulation panel\n"
-            "Ctrl+3: Show Switches panel\n"
-            "Ctrl+4: Show Console panel\n"
-            "Delete: Clear console messages\n"
-            "Ctrl+Q: Exit",
+            _(
+                "F1: Quick start help\n"
+                "Space: Run the selected number of cycles\n"
+                "Right arrow: Run one cycle\n"
+                "Ctrl+Space: Play or pause live tracing\n"
+                "Ctrl+Z: Undo one cycle\n"
+                "Ctrl+Y: Redo one cycle\n"
+                "Ctrl+O: Open a circuit file\n"
+                "Ctrl+=: Zoom in\n"
+                "Ctrl+-: Zoom out\n"
+                "Ctrl+I: Show or hide cycle inspector\n"
+                "Ctrl+Shift+P: Export waveform as PNG\n"
+                "Ctrl+Shift+E: Export traces as CSV\n"
+                "F: Snap the 3D view to the front\n"
+                "R: Reset view\n"
+                "B: Cycle the 3D trace background display mode\n"
+                "Drag: Orbit the 3D view\n"
+                "Shift+Drag: Pan the 3D view\n"
+                "Scroll: Zoom the 3D view\n"
+                "Ctrl+1: Show Available Signals panel\n"
+                "Ctrl+2: Show Simulation panel\n"
+                "Ctrl+3: Show Switches panel\n"
+                "Ctrl+4: Show Console panel\n"
+                "Delete: Clear console messages\n"
+                "Ctrl+Q: Exit"
+            ),
             _("Keyboard Shortcuts"),
             wx.ICON_INFORMATION | wx.OK,
         )
@@ -1816,14 +1878,16 @@ class Gui(wx.Frame):
     def on_syntax_help(self, event):
         """Show a brief reminder of the circuit definition sections."""
         wx.MessageBox(
-            "Circuit files describe devices, connections, and monitors.\n\n"
-            "Typical sections define:\n"
-            "- devices such as switches, gates, clocks, and D-types\n"
-            "- connections between device outputs and inputs\n"
-            "- monitor signals to record and display\n\n"
-            "Signals inside modules are shown with collapsible module names "
-            "in the GUI.\n"
-            "Use File > Open to load another circuit definition without restarting.",
+            _(
+                "Circuit files describe devices, connections, and monitors.\n\n"
+                "Typical sections define:\n"
+                "- devices such as switches, gates, clocks, and D-types\n"
+                "- connections between device outputs and inputs\n"
+                "- monitor signals to record and display\n\n"
+                "Signals inside modules are shown with collapsible module names "
+                "in the GUI.\n"
+                "Use File > Open to load another circuit definition without restarting."
+            ),
             _("Circuit File Syntax"),
             wx.ICON_INFORMATION | wx.OK,
         )
@@ -2574,6 +2638,13 @@ class Gui(wx.Frame):
         self.Layout()
         get_active_canvas(self).render()
 
+    def on_cycle_inspector_button(self, event):
+        """Toggle the cycle inspector from the toolbar button."""
+        self.cycle_inspector_menu_item.Check(
+            not self.cycle_inspector_menu_item.IsChecked()
+        )
+        self.on_toggle_cycle_inspector(event)
+
     def on_cycle_inspector_slider(self, event):
         """Update the inspected cycle when the slider is moved."""
         slider_value = self.cycle_inspector_slider.GetValue()
@@ -2637,6 +2708,9 @@ class Gui(wx.Frame):
         self.text.SetLabel(_("Cycles to run"))
         self.run_cycles_button.SetLabel(_("Run cycles"))
         self.reset_button.SetLabel(_("Reset simulation"))
+        self.reset_view_button.SetLabel(_("Reset view"))
+        self.reset_view_button.SetToolTip(_("Reset view"))
+        self.cycle_inspector_button.SetToolTip(_("Show cycle inspector"))
         self.clear_traces_button.SetLabel(_("Clear traces"))
         self.clear_status_button.SetLabel(_("Clear console"))
         self.cycle_inspector_label.SetLabel(_("Cycle:"))
@@ -3153,6 +3227,7 @@ class Gui(wx.Frame):
         """
         self.theme = THEMES[self.theme_name]
         self.canvas_2d.theme = self.theme
+        self.canvas_2d.apply_no_monitor_label_theme()
         self.canvas_2d.init = False
         self.canvas_3d.theme = self.theme
         self.canvas_3d.init = False
@@ -3161,16 +3236,30 @@ class Gui(wx.Frame):
             self.theme_menu_item.SetItemLabel(_("Switch to light mode\tCtrl+Shift+T"))
             undo_icon_path = DARK_UNDO_ICON_PATH
             redo_icon_path = DARK_REDO_ICON_PATH
+            inspector_icon_path = DARK_INSPECTOR_ICON_PATH
         else:
             self.theme_menu_item.SetItemLabel(_("Switch to dark mode\tCtrl+Shift+T"))
             undo_icon_path = LIGHT_UNDO_ICON_PATH
             redo_icon_path = LIGHT_REDO_ICON_PATH
+            inspector_icon_path = LIGHT_INSPECTOR_ICON_PATH
 
         self.apply_history_button_theme(
             self.undo_button, undo_icon_path, _("Undo one cycle")
         )
         self.apply_history_button_theme(
             self.redo_button, redo_icon_path, _("Redo one cycle")
+        )
+        self.apply_history_button_theme(
+            self.reset_view_button,
+            None,
+            _("Reset view"),
+            fallback_label=_("Reset view"),
+        )
+        self.apply_history_button_theme(
+            self.cycle_inspector_button,
+            inspector_icon_path,
+            _("Show cycle inspector"),
+            icon_size=22,
         )
         self.apply_live_trace_button_theme()
         self.apply_live_trace_speed_button_theme()
@@ -3258,6 +3347,9 @@ class Gui(wx.Frame):
         Return a wx.Bitmap or None if the icon cannot be loaded.
 
         """
+        if icon_path is None:
+            return None
+
         cache_key = (icon_path, size)
         if not hasattr(self, "icon_bitmap_cache"):
             self.icon_bitmap_cache = {}
@@ -3276,8 +3368,10 @@ class Gui(wx.Frame):
         self.icon_bitmap_cache[cache_key] = bitmap
         return bitmap
 
-    def apply_history_button_theme(self, button, icon_path, tooltip):
-        """Apply the shared compact icon style to an undo or redo button."""
+    def apply_history_button_theme(
+        self, button, icon_path, tooltip, fallback_label=None, icon_size=16
+    ):
+        """Apply the shared compact style to toolbar buttons."""
         button.SetBackgroundColour(self.theme["frame_bg"])
         button.SetForegroundColour(self.theme["text"])
         button.SetToolTip(tooltip)
@@ -3289,13 +3383,14 @@ class Gui(wx.Frame):
         if hasattr(button, "SetUseFocusIndicator"):
             button.SetUseFocusIndicator(False)
 
-        bitmap = self.load_icon_bitmap(icon_path, 16)
+        bitmap = self.load_icon_bitmap(icon_path, icon_size)
         if bitmap is not None:
             button.SetLabel("")
             button.SetBitmapLabel(bitmap)
         else:
-            button.SetLabel(tooltip.split()[0])
-            button.SetBitmapLabel(wx.Bitmap(1, 1))
+            button.SetLabel(fallback_label or tooltip.split()[0])
+            if icon_path is not None and hasattr(button, "SetBitmapLabel"):
+                button.SetBitmapLabel(wx.Bitmap(1, 1))
 
         button.Refresh()
 
@@ -3773,6 +3868,7 @@ class Gui(wx.Frame):
         label = wx.StaticText(
             self.switch_rows, wx.ID_ANY, switch_name, style=wx.ST_ELLIPSIZE_END
         )
+        self.align_static_text(label)
         label.SetMinSize((0, -1))
         label.SetToolTip(switch_name)
         low_label = wx.StaticText(self.switch_rows, wx.ID_ANY, _("LOW"))
@@ -3810,11 +3906,18 @@ class Gui(wx.Frame):
             low_button, high_button, low_label, high_label, device.switch_state
         )
 
-        row_sizer.Add(label, 1, wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, 6)
-        row_sizer.Add(low_label, 0, wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, 3)
-        row_sizer.Add(low_button, 0, wx.ALIGN_CENTER_VERTICAL)
-        row_sizer.Add(high_button, 0, wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, 3)
-        row_sizer.Add(high_label, 0, wx.ALIGN_CENTER_VERTICAL)
+        if self.language_code == "ar":
+            row_sizer.Add(high_label, 0, wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, 3)
+            row_sizer.Add(high_button, 0, wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, 3)
+            row_sizer.Add(low_button, 0, wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, 3)
+            row_sizer.Add(low_label, 0, wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, 6)
+            row_sizer.Add(label, 1, wx.ALIGN_CENTER_VERTICAL)
+        else:
+            row_sizer.Add(label, 1, wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, 6)
+            row_sizer.Add(low_label, 0, wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, 3)
+            row_sizer.Add(low_button, 0, wx.ALIGN_CENTER_VERTICAL)
+            row_sizer.Add(high_button, 0, wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, 3)
+            row_sizer.Add(high_label, 0, wx.ALIGN_CENTER_VERTICAL)
         self.switch_rows_sizer.Add(row_sizer, 0, wx.EXPAND | wx.ALL, 4)
 
     def update_module_signal_rows(self):
@@ -3896,7 +3999,7 @@ class Gui(wx.Frame):
         for module_name in sorted(signal_group):
             if module_name == "signals_at_this_level":
                 continue
-            pane_label = module_name + " internals"
+            pane_label = tr("{module_name} internals", module_name=module_name)
             pane_parent = parent
             if self.language_code == "ar":
                 pane_parent = wx.Panel(parent, wx.ID_ANY)
