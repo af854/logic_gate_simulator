@@ -11,6 +11,7 @@ Devices - makes and stores all the devices in the logic network.
 
 import random
 
+# Edited to add new devices: RC and SIGGEN
 
 class Device:
     """Store device properties.
@@ -95,12 +96,19 @@ class Devices:
     make_clock(self, device_id, clock_half_period): Makes a clock device with
                                                     the specified half period.
 
+    make_rc(self, device_id, rc_delay): Makes an RC device with the specified
+                                        delay.
+
+    make_siggen(self, device_id, pattern): Makes a SIGGEN device with the
+                                           specified binary pattern.
+
     make_gate(self, device_id, device_kind, no_of_inputs): Makes logic gates
                                         with the specified number of inputs.
 
     make_d_type(self, device_id): Makes a D-type device.
 
-    cold_startup(self): Simulates cold start-up of D-types and clocks.
+    cold_startup(self): Simulates cold start-up of D-types, clocks, RCs, and
+                        SIGGENs.
 
     make_device(self, device_id, device_kind, device_property=None): Creates
                        the specified device and returns errors if unsuccessful.

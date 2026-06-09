@@ -6,12 +6,16 @@ Classes
 --------
 Network - builds and executes the network.
 """
-
-# Minor change made by Kevin Liu: 
-# separate DEVICE_ABSENT into FIRST_DEVICE_ABSENT 
-# and SECOND_DEVICE_ABSENT, and same for PORT_ABSENT
-# to easily allow error messages to point accurately to 
-# the correct device in a connection statement. 
+# INTERIM CHANGES:
+#   separate DEVICE_ABSENT into FIRST_DEVICE_ABSENT 
+#   and SECOND_DEVICE_ABSENT, and same for PORT_ABSENT
+#   to easily allow error messages to point accurately to 
+#   the correct device in a connection statement. 
+# FINAL CHANGES:
+#   Add handling for SIGGEN and RC devices
+#   (Add methods to update and execute the new devices,
+#   and group execution of CLOCK with the SIGGEN and RC 
+#   into new method called execute_signal_source). 
 
 class Network:
 
@@ -56,11 +60,20 @@ class Network:
     execute_d_type(self, device_id): Simulates a D-type device and updates its
                                      output signal value.
 
+    execute_signal_source(self, device_id): Simulates a signal source whose
+                                    output has already been set to RISING or
+                                    FALLING.
+
     execute_clock(self, device_id): Simulates a clock and updates its output
                                     signal value.
 
     update_clocks(self): If it is time to do so, sets clock signals to RISING
                          or FALLING.
+
+    update_rcs(self): If it is time to do so, sets RC signals to FALLING.
+
+    update_siggens(self): Sets SIGGEN signals to RISING or FALLING according
+                          to their stored binary patterns.
 
     execute_network(self): Executes all the devices in the network for one
                            simulation cycle.

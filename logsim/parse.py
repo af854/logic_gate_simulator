@@ -1367,26 +1367,26 @@ class Parser:
     # HELPER FUNCTIONS FOR LITERALS
     #############################################################################################
 
-    def _get_or_create_const_switch(self, signal: Signal) -> int | None:
-        """Return the internal SWITCH device ID for a literal signal.
+    def _get_or_create_const_device(self, signal: Signal) -> int | None:
+        """Return the internal SIGGEN device ID for a literal signal.
 
         Arguments:
         signal -- Signal object with is_literal=True and literal_value equal to 0 or 1.
 
         Return the device ID for @LITERAL_0 or @LITERAL_1, creating the corresponding
-        SWITCH device if necessary. Return None if network building is disabled or if
+        SIGGEN device if necessary. Return None if network building is disabled or if
         an error occurs.
 
         Effects:
         May add @LITERAL_0 or @LITERAL_1 to the names table and create an artificial
-        SWITCH device. May print an error and increment error_count for invalid input.
+        SIGGEN device. May print an error and increment error_count for invalid input.
 
         Restrictions:
         Should be called only on literal Signal objects, during connection resolution.
         """
         # When there is a literal in the code like 0 or 1,
-        # We create artificial SWITCH(0) and SWITCH(1) with an internal
-        # switch name @LITERAL_0 or @LITERAL_1
+        # We create artificial SIGGEN(0) and SIGGEN(1) with an internal
+        # device name @LITERAL_0 or @LITERAL_1
         # and use that to provide the literal signal.
 
         if not self._can_build_network():
@@ -1394,9 +1394,10 @@ class Parser:
 
         if not signal.is_literal:
             self._error(
-                "Internal error: get_or_create_const_switch called on a non-literal signal",
+                "Internal error: get_or_create_const_device called on a non-literal signal",
                 signal.main_symbol,
             )
+            return None
 
         value = signal.literal_value
 
@@ -1419,14 +1420,14 @@ class Parser:
 
         error_type = self.devices.make_device(
             const_device_id,
-            self.devices.SWITCH,
-            value,
+            self.devices.SIGGEN,
+            str(value),
         )
 
         error_message = self._device_error_message(error_type)
         if error_message is not None:
             print(
-                "Internal Error: unexpected error when creating literal switch:"
+                "Internal Error: unexpected error when creating literal: "
             )  # This should never happen
             self._error(error_message, signal.main_symbol)
             return None
@@ -3186,7 +3187,7 @@ class Parser:
                 output_signal = self.net_driver_dict[net_id]
 
             if output_signal.is_literal:
-                output_device_id = self._get_or_create_const_switch(output_signal)
+                output_device_id = self._get_or_create_const_device(output_signal)
                 if output_device_id is None:
                     break
                 output_port_id = None

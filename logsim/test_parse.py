@@ -1032,49 +1032,49 @@ def test_flatten_net_driver_dict_undriven_net(parser_env):
 # test literals
 
 
-def test_get_or_create_const_switch_zero_new(parser_env):
+def test_get_or_create_const_device_zero_new(parser_env):
     p = parser_env
     p.names.query.return_value = None
     p.names.lookup.return_value = [99]
     p.devices.make_device.return_value = p.devices.NO_ERROR
-    res = p._get_or_create_const_switch(DummySignal(is_literal=True, literal_value=0))
+    res = p._get_or_create_const_device(DummySignal(is_literal=True, literal_value=0))
     assert p.devices.make_device.called
     assert res == 99
 
 
-def test_get_or_create_const_switch_one_new(parser_env):
+def test_get_or_create_const_device_one_new(parser_env):
     p = parser_env
     p.names.query.return_value = None
     p.names.lookup.return_value = [99]
     p.devices.make_device.return_value = p.devices.NO_ERROR
-    res = p._get_or_create_const_switch(DummySignal(is_literal=True, literal_value=1))
+    res = p._get_or_create_const_device(DummySignal(is_literal=True, literal_value=1))
     assert p.devices.make_device.called
     assert res == 99
 
 
-def test_get_or_create_const_switch_exists(parser_env):
+def test_get_or_create_const_device_exists(parser_env):
     p = parser_env
     p.names.query.return_value = 99
     p.names.lookup.return_value = [99]
     p.devices.get_device.return_value = True  # mock pre-existence
-    res = p._get_or_create_const_switch(DummySignal(is_literal=True, literal_value=0))
+    res = p._get_or_create_const_device(DummySignal(is_literal=True, literal_value=0))
     p.devices.make_device.assert_not_called()
     assert res == 99
 
 
-def test_get_or_create_const_switch_invalid_val(parser_env):
+def test_get_or_create_const_device_invalid_val(parser_env):
     p = parser_env
     p._error = MagicMock()
-    res = p._get_or_create_const_switch(DummySignal(is_literal=True, literal_value=2))
+    res = p._get_or_create_const_device(DummySignal(is_literal=True, literal_value=2))
     p._error.assert_called()
     assert res is None
 
 
-def test_get_or_create_const_switch_non_literal(parser_env):
+def test_get_or_create_const_device_non_literal(parser_env):
     p = parser_env
     p._error = MagicMock()
     p.names.lookup.return_value = [99]
-    res = p._get_or_create_const_switch(DummySignal(is_literal=False))
+    res = p._get_or_create_const_device(DummySignal(is_literal=False))
     p._error.assert_called()
     assert res is None
 
@@ -1978,7 +1978,6 @@ def test_parse_device_module_undefined(parser_env):
             [DummySymbol(p.scanner.NAME, 2)],
         )
     )
-
     p._parse_device()
 
     p._error.assert_called()
