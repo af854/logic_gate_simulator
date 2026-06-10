@@ -22,7 +22,7 @@ import wx
 import wx.glcanvas as wxcanvas
 import wx.lib.buttons as wxbuttons
 from devices import Devices
-from gui_3D import Canvas3D
+from gui_3D import Canvas3D, load_preferences
 from monitors import Monitors
 from names import Names
 from network import Network
@@ -68,7 +68,7 @@ def set_gui_language(language_code: str) -> wx.Locale:
 
 def _get_active_canvas(gui: Any) -> Any:
     """Return the active canvas for real GUI or test double instances."""
-    if hasattr(gui, "canvas"):
+    if getattr(gui, "canvas", None) is not None:
         return gui.canvas
 
     if (
@@ -1519,16 +1519,15 @@ class Gui(wx.Frame):
         self.view_aa_menu_item = view_menu.AppendCheckItem(
             ID_TOGGLE_MULTISAMPLE, _("Enable 3D anti-aliasing")
         )
-        if hasattr(self, "canvas_3d") and hasattr(
-            self.canvas_3d, "multisample_enabled"
-        ):
-            if not self.canvas_3d.multisample_enabled:
+        canvas_3d = getattr(self, "canvas_3d", None)
+        if canvas_3d is not None and hasattr(canvas_3d, "multisample_enabled"):
+            if not canvas_3d.multisample_enabled:
                 self.view_aa_menu_item.Check(False)
                 self.view_aa_menu_item.Enable(False)
             else:
                 self.view_aa_menu_item.Check(True)
         else:
-            self.view_aa_menu_item.Check(True)
+            self.view_aa_menu_item.Check(False)
 
         view_menu.AppendSeparator()
 
@@ -2774,10 +2773,19 @@ class Gui(wx.Frame):
 
         # Preserve shared view state where both canvases have matching attributes.
         old_cycle_offset = getattr(old_canvas, "cycle_offset", 0)
-        old_cycle_inspector_enabled = getattr(old_canvas, "cycle_inspector_enabled", False)
+        old_cycle_inspector_enabled = getattr(
+            old_canvas, "cycle_inspector_enabled", False
+        )
         old_cycle_inspector_index = getattr(old_canvas, "cycle_inspector_index", 0)
 
         if old_canvas is not None:
+            if hasattr(old_canvas, "tutorial_overlay") and old_canvas.tutorial_overlay is not None:
+                old_canvas.tutorial_overlay.Hide()
+                old_canvas.tutorial_overlay.Destroy()
+                old_canvas.tutorial_overlay = None
+                old_canvas.tutorial_active = False
+
+            old_canvas.Hide()
             self.canvas_sizer.Detach(old_canvas)
             old_canvas.Destroy()
 
@@ -2806,8 +2814,22 @@ class Gui(wx.Frame):
         self.canvas_sizer.Insert(0, new_canvas, 1, wx.EXPAND)
         self.Layout()
 
+        if is_3d:
+            self.view_aa_menu_item.Enable(True)
+            self.view_aa_menu_item.Check(new_canvas.multisample_enabled)
+        else:
+            self.view_aa_menu_item.Check(False)
+            self.view_aa_menu_item.Enable(False)
+
         new_canvas.Refresh()
         self.show_status(message)
+
+        if is_3d:
+            wx.CallAfter(new_canvas.snap_reset_view)
+
+            prefs = load_preferences()
+            if prefs.get("hide_3d_tutorial", "false") != "true":
+                wx.CallAfter(new_canvas.prompt_tutorial)
 
     def on_toggle_multisample(self, event: wx.CommandEvent) -> None:
         """Toggle multisample antialiasing for the 3D canvas."""
@@ -2819,10 +2841,12 @@ class Gui(wx.Frame):
         new_state = not self.canvas_3d.multisample_enabled
         self.canvas_3d.set_multisample(new_state)
         self.view_aa_menu_item.Check(new_state)
+
         if new_state:
             self.show_status(_("3D antialiasing enabled"))
         else:
             self.show_status(_("3D antialiasing disabled"))
+
         if self.view_3d_menu_item.IsChecked():
             _get_active_canvas(self).render()
 
@@ -3106,16 +3130,15 @@ class Gui(wx.Frame):
         self.view_aa_menu_item = view_menu.AppendCheckItem(
             ID_TOGGLE_MULTISAMPLE, _("Enable 3D anti-aliasing")
         )
-        if hasattr(self, "canvas_3d") and hasattr(
-            self.canvas_3d, "multisample_enabled"
-        ):
-            if not self.canvas_3d.multisample_enabled:
+        canvas_3d = getattr(self, "canvas_3d", None)
+        if canvas_3d is not None and hasattr(canvas_3d, "multisample_enabled"):
+            if not canvas_3d.multisample_enabled:
                 self.view_aa_menu_item.Check(False)
                 self.view_aa_menu_item.Enable(False)
             else:
                 self.view_aa_menu_item.Check(True)
         else:
-            self.view_aa_menu_item.Check(True)
+            self.view_aa_menu_item.Check(False)
 
         view_menu.AppendSeparator()
 
