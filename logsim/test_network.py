@@ -337,6 +337,101 @@ def test_execute_non_gates(new_network):
             eval(clock_output), eval(dtype_Q), eval(dtype_QBAR)] == [
                 HIGH, LOW, HIGH, HIGH, LOW, HIGH]
 
+## NEW TESTS FOR NEW DEVICES SIGGEN AND RC
+
+def test_execute_rc(new_network):
+    """Test if execute_network returns the correct output for RC devices."""
+    network = new_network
+    devices = network.devices
+    names = devices.names
+
+    [RC_ID] = names.lookup(["Rc1"])
+
+    devices.make_device(RC_ID, devices.RC, 3) # on for 3 cycles
+
+    network.execute_network()
+    assert network.get_output_signal(RC_ID, None) == devices.HIGH
+
+    network.execute_network()
+    assert network.get_output_signal(RC_ID, None) == devices.HIGH
+
+    network.execute_network()
+    assert network.get_output_signal(RC_ID, None) == devices.HIGH
+
+    network.execute_network()
+    assert network.get_output_signal(RC_ID, None) == devices.LOW
+
+    network.execute_network()
+    assert network.get_output_signal(RC_ID, None) == devices.LOW
+
+def test_execute_siggen(new_network):
+    """Test if execute_network returns the correct output for SIGGEN devices."""
+    network = new_network
+    devices = network.devices
+    names = devices.names
+
+    [SIGGEN_ID] = names.lookup(["Siggen1"])
+
+    devices.make_device(SIGGEN_ID, devices.SIGGEN, "010")
+
+    network.execute_network()
+    assert network.get_output_signal(SIGGEN_ID, None) == devices.LOW
+
+    network.execute_network()
+    assert network.get_output_signal(SIGGEN_ID, None) == devices.HIGH
+
+    network.execute_network()
+    assert network.get_output_signal(SIGGEN_ID, None) == devices.LOW
+
+    # Pattern should repeat.
+    for _ in range(500):
+        network.execute_network()
+        assert network.get_output_signal(SIGGEN_ID, None) == devices.LOW
+        network.execute_network()
+        assert network.get_output_signal(SIGGEN_ID, None) == devices.HIGH
+        network.execute_network()
+        assert network.get_output_signal(SIGGEN_ID, None) == devices.LOW
+
+def test_rc_and_siggen_drive_gate(new_network):
+    """Test if RC and SIGGEN devices can drive gate inputs."""
+    network = new_network
+    devices = network.devices
+    names = devices.names
+
+    # we make a simple circuit with SIGGEN and RC 
+    # Circuit has a RC(2) and SIGGEN(0101) feeding into
+    # an AND Gate
+    # So and output should be High for cycle 2 only.
+
+    [RC_ID, SIGGEN_ID, AND_ID, I1, I2] = names.lookup(
+        ["Rc1", "Siggen1", "And1", "I1", "I2"])
+
+    devices.make_device(RC_ID, devices.RC, 2)
+    devices.make_device(SIGGEN_ID, devices.SIGGEN, "0101")
+    devices.make_device(AND_ID, devices.AND, 2)
+
+    network.make_connection(RC_ID, None, AND_ID, I1)
+    network.make_connection(SIGGEN_ID, None, AND_ID, I2)
+
+    network.execute_network()
+    assert network.get_output_signal(RC_ID, None) == devices.HIGH
+    assert network.get_output_signal(SIGGEN_ID, None) == devices.LOW
+    assert network.get_output_signal(AND_ID, None) == devices.LOW
+
+    network.execute_network()
+    assert network.get_output_signal(RC_ID, None) == devices.HIGH
+    assert network.get_output_signal(SIGGEN_ID, None) == devices.HIGH
+    assert network.get_output_signal(AND_ID, None) == devices.HIGH
+
+    network.execute_network()
+    assert network.get_output_signal(RC_ID, None) == devices.LOW
+    assert network.get_output_signal(SIGGEN_ID, None) == devices.LOW
+    assert network.get_output_signal(AND_ID, None) == devices.LOW
+
+    network.execute_network()
+    assert network.get_output_signal(RC_ID, None) == devices.LOW
+    assert network.get_output_signal(SIGGEN_ID, None) == devices.HIGH
+    assert network.get_output_signal(AND_ID, None) == devices.LOW
 
 def test_oscillating_network(new_network):
     """Test if the execute_network returns False for oscillating networks."""

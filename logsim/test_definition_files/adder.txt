@@ -1,27 +1,28 @@
 DEVICES
-  SWITCH(0) SW1, SW2, SW3;
-  XOR XOR1, XOR2;
-  AND(2) AND1, AND2;
-  OR(2) OR1;
+    SWITCH(0) A, B, CIN;
+    XOR XOR1, XOR2;
+    AND(2) AND1, AND2;
+    OR(2) OR1;
 NETS
-  partial_sum;
-
+    SUM, COUT;
 CONNECT
-  XOR1.I1 = SW1;
-  XOR1.I2 = SW2;
-  partial_sum = XOR1;
-  
-  XOR2.I1 = partial_sum;
-  XOR2.I2 = SW3;
-  
-  AND1.I1 = SW1;
-  AND1.I2 = SW2; 
+    XOR1.I1 = A;
+    XOR1.I2 = B;
 
-  AND2.I1 = partial_sum;
-  AND2.I2 = SW3;
+    XOR2.I1 = XOR1;
+    XOR2.I2 = CIN;
 
-  OR1.I1 = AND1;
-  OR1.I2 = AND2;
+    AND1.I1 = A;
+    AND1.I2 = B;
 
+    AND2.I1 = XOR1;
+    AND2.I2 = CIN;
+
+    OR1.I1 = AND1;
+    OR1.I2 = AND2;
+
+    SUM = XOR2;
+    COUT = OR1;
 MONITOR
-  partial_sum, XOR2, OR1;
+    A, B, CIN;
+    SUM, COUT;

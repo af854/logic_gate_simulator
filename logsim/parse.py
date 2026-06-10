@@ -14,9 +14,10 @@ from __future__ import annotations
 from parser_objects import ModuleDefinition, ModuleDevice, Signal
 from scanner import Symbol
 
-# TYPE ALIASES
-#DeviceKindResult = tuple[str, int, int | str | None]
-#DeviceStatementResult = tuple[Symbol, DeviceKindResult, list[Symbol]]
+# TYPE Aliases for complicated return types 
+from typing import Union
+DeviceKindResult = tuple[str, int, Union[int, str, None]]
+DeviceStatementResult = tuple[Symbol, DeviceKindResult, list[Symbol]]
 
 # Max error messages to display. A count of the number of additional
 # errors will be displayed after MAX_ERROR_MSGS is displayed.

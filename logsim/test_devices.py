@@ -96,6 +96,59 @@ def test_make_device(new_devices):
     assert dtype_device.dtype_memory in [new_devices.LOW, new_devices.HIGH]
 
 
+# 2 New tests for new devices RC and SIGGEN
+
+def test_make_rc_and_siggen(new_devices):
+    """Test if make_device correctly makes RC and SIGGEN devices."""
+    names = new_devices.names
+
+    [RC1_ID, SIGGEN1_ID] = names.lookup(["Rc1", "Siggen1"])
+
+    new_devices.make_device(RC1_ID, new_devices.RC, 3)
+    new_devices.make_device(SIGGEN1_ID, new_devices.SIGGEN, "0101")
+
+    rc_device = new_devices.get_device(RC1_ID)
+    siggen_device = new_devices.get_device(SIGGEN1_ID)
+
+    assert rc_device.inputs == {}
+    assert siggen_device.inputs == {}
+
+    assert rc_device.outputs == {None: new_devices.HIGH}
+    assert siggen_device.outputs == {None: new_devices.LOW}
+
+    assert rc_device.rc_delay == 3
+    assert rc_device.rc_counter == 0
+
+    assert siggen_device.siggen_pattern == "0101"
+    assert siggen_device.siggen_counter == 0
+
+
+@pytest.mark.parametrize(
+    "function_args, error",
+    [
+        ("(RC1_ID, new_devices.RC, None)", "new_devices.NO_QUALIFIER"),
+        ("(RC1_ID, new_devices.RC, 0)", "new_devices.INVALID_QUALIFIER"),
+        ("(RC1_ID, new_devices.RC, -1)", "new_devices.INVALID_QUALIFIER"),
+        ("(RC1_ID, new_devices.RC, 3)", "new_devices.NO_ERROR"),
+        ("(SIGGEN1_ID, new_devices.SIGGEN, None)", "new_devices.NO_QUALIFIER"),
+        ("(SIGGEN1_ID, new_devices.SIGGEN, '')", "new_devices.INVALID_QUALIFIER"),
+        # Should be string
+        ("(SIGGEN1_ID, new_devices.SIGGEN, 1010)", "new_devices.INVALID_QUALIFIER"),
+        ("(SIGGEN1_ID, new_devices.SIGGEN, '01201')", "new_devices.INVALID_QUALIFIER"),
+        ("(SIGGEN1_ID, new_devices.SIGGEN, '0101')", "new_devices.NO_ERROR"),
+    ],
+)
+def test_make_rc_and_siggen_gives_errors(new_devices, function_args, error):
+    """Test if make_device returns the appropriate errors for RC and SIGGEN."""
+    names = new_devices.names
+    [RC1_ID, SIGGEN1_ID] = names.lookup(["Rc1", "Siggen1"])
+
+    # left_expression is of the form: new_devices.make_device(...)
+    left_expression = eval("".join(["new_devices.make_device", function_args]))
+    right_expression = eval(error)
+    assert left_expression == right_expression
+
+
 @pytest.mark.parametrize(
     "function_args, error",
     [
