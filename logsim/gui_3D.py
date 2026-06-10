@@ -5,29 +5,199 @@ dimensional space and groups inputs, internals and outputs onto separated depth
 planes for clearer visual analysis.
 """
 
-import sys
+import os
 
 import numpy as np
 import wx
 import wx.glcanvas as wxcanvas
 from OpenGL import GL, GLU, GLUT
 
-GLUT_INITIALISED = False
+
+def load_preferences():
+    """Load user preferences from cfg file."""
+    prefs = {}
+    if os.path.exists("preferences.cfg"):
+        with open("preferences.cfg", "r") as f:
+            for line in f:
+                if "=" in line:
+                    k, v = line.strip().split("=", 1)
+                    prefs[k.strip()] = v.strip().lower()
+    return prefs
 
 
-def initialise_glut_once():
-    """Initialise GLUT once per process to support bitmap text.
+def save_preference(key, value):
+    """Save a single preference to cfg file."""
+    prefs = load_preferences()
+    prefs[key] = str(value).lower()
+    with open("preferences.cfg", "w") as f:
+        for k, v in prefs.items():
+            f.write(f"{k}={v}\n")
 
-    This function is safe to call repeatedly and only performs work on the
-    first call.
-    """
-    global GLUT_INITIALISED
-    if not GLUT_INITIALISED:
-        try:
-            GLUT.glutInit(sys.argv)
-            GLUT_INITIALISED = True
-        except Exception:
-            pass
+
+class TutorialPromptDialog(wx.Dialog):
+    """Initial popup asking the user if they want to run the tutorial."""
+
+    def __init__(self, parent, theme):
+        super().__init__(parent, title="3D View Tutorial")
+        self.SetBackgroundColour(theme.get("panel_bg", wx.Colour(43, 46, 51)))
+        self.SetForegroundColour(theme.get("text", wx.Colour(232, 234, 237)))
+
+        sizer = wx.BoxSizer(wx.VERTICAL)
+        lbl = wx.StaticText(
+            self, label="Would you like to complete a quick tutorial for the 3D view?"
+        )
+        sizer.Add(lbl, 0, wx.ALL, 15)
+
+        btn_sizer = wx.BoxSizer(wx.HORIZONTAL)
+        self.btn_start = wx.Button(self, label="Start")
+        self.btn_no = wx.Button(self, label="No")
+        self.btn_never = wx.Button(self, label="Don't show again")
+
+        for btn in (self.btn_start, self.btn_no, self.btn_never):
+            btn.SetBackgroundColour(theme.get("button_bg", wx.Colour(55, 59, 66)))
+            btn.SetForegroundColour(theme.get("text", wx.Colour(232, 234, 237)))
+            btn_sizer.Add(btn, 0, wx.ALL, 5)
+
+        self.btn_start.Bind(wx.EVT_BUTTON, self.on_start)
+        self.btn_no.Bind(wx.EVT_BUTTON, self.on_no)
+        self.btn_never.Bind(wx.EVT_BUTTON, self.on_never)
+
+        sizer.Add(btn_sizer, 0, wx.ALIGN_CENTER | wx.BOTTOM, 10)
+        self.SetSizerAndFit(sizer)
+        self.result = "NO"
+
+    def on_start(self, event):
+        self.result = "START"
+        self.EndModal(wx.ID_OK)
+
+    def on_no(self, event):
+        self.result = "NO"
+        self.EndModal(wx.ID_OK)
+
+    def on_never(self, event):
+        self.result = "NEVER"
+        self.EndModal(wx.ID_OK)
+
+
+class TutorialOverlay(wx.Frame):
+    """Floating panel tracking progress at the bottom of the canvas."""
+
+    def __init__(self, parent, canvas):
+        super().__init__(
+            parent,
+            style=wx.FRAME_FLOAT_ON_PARENT | wx.BORDER_SIMPLE | wx.FRAME_NO_TASKBAR,
+        )
+        self.canvas = canvas
+        self.SetBackgroundColour(canvas.theme.get("panel_bg", wx.Colour(43, 46, 51)))
+        self.SetForegroundColour(canvas.theme.get("text", wx.Colour(232, 234, 237)))
+
+        self.sizer = wx.BoxSizer(wx.VERTICAL)
+        self.instruction_label = wx.StaticText(self, label="Loading...")
+        font = self.instruction_label.GetFont()
+        font.SetWeight(wx.FONTWEIGHT_BOLD)
+        self.instruction_label.SetFont(font)
+        self.sizer.Add(self.instruction_label, 0, wx.ALL | wx.ALIGN_CENTER, 10)
+
+        # Gauge range reduced to 6 due to combining the orbit steps
+        self.gauge = wx.Gauge(self, range=6, size=(250, 15))
+        self.sizer.Add(self.gauge, 0, wx.ALL | wx.ALIGN_CENTER, 5)
+
+        self.next_btn = wx.Button(self, label="Next")
+        self.next_btn.Bind(wx.EVT_BUTTON, self.on_next)
+        self.sizer.Add(self.next_btn, 0, wx.ALL | wx.ALIGN_CENTER, 5)
+
+        self.SetSizerAndFit(self.sizer)
+        canvas.Bind(wx.EVT_SIZE, self.on_canvas_size)
+
+    def on_canvas_size(self, event):
+        self.reposition()
+        event.Skip()
+
+    def reposition(self):
+        """Anchor the overlay to the bottom center of the 3D canvas."""
+        if not self.IsShown():
+            return
+        rect = self.canvas.GetScreenRect()
+        w, h = self.GetSize()
+        x = rect.x + (rect.width - w) // 2
+        y = rect.y + rect.height - h - 30
+        self.SetPosition((x, y))
+
+    def update_step(self, step, completed=False):
+        instructions = [
+            "Click and drag to orbit the view.",
+            "Hold SHIFT and drag to pan the view.",
+            "Scroll the mouse wheel to zoom in and out.",
+            "Press 'F' for front view.",
+            "Press 'R' to reset view.",
+            "Press 'B' to cycle between a set of 3 backgrounds.",
+            "Tutorial complete!",
+        ]
+        self.gauge.SetValue(step)
+        if step < len(instructions):
+            self.instruction_label.SetLabel(instructions[step])
+
+        # Style the next button based on step completion, but keep it clickable either way
+        if completed:
+            self.next_btn.SetBackgroundColour(wx.Colour(67, 150, 95))  # Distinct Green
+            self.next_btn.SetForegroundColour(wx.Colour(255, 255, 255))
+        else:
+            # Secretly leave enabled, but reset to the muted grey default theme
+            self.next_btn.SetBackgroundColour(
+                self.canvas.theme.get("button_bg", wx.Colour(55, 59, 66))
+            )
+            self.next_btn.SetForegroundColour(
+                self.canvas.theme.get("text", wx.Colour(232, 234, 237))
+            )
+
+        if step == 6:
+            self.next_btn.SetLabel("Finish")
+            self.next_btn.SetBackgroundColour(wx.Colour(67, 150, 95))
+            self.next_btn.SetForegroundColour(wx.Colour(255, 255, 255))
+
+        # Force a UI refresh AND an immediate screen update so the color
+        # swap applies instantly without waiting for the drag to stop.
+        self.next_btn.Refresh()
+        self.next_btn.Update()
+        self.Layout()
+        self.reposition()
+
+    def on_next(self, event):
+        if self.canvas.tutorial_step == 6:
+            # Final completion dialogue
+            dlg = wx.Dialog(self, title="Tutorial Complete")
+            dlg.SetBackgroundColour(
+                self.canvas.theme.get("panel_bg", wx.Colour(43, 46, 51))
+            )
+            dlg.SetForegroundColour(
+                self.canvas.theme.get("text", wx.Colour(232, 234, 237))
+            )
+            sz = wx.BoxSizer(wx.VERTICAL)
+            txt = wx.StaticText(dlg, label="Click HELP to see other keybinds.")
+            chk = wx.CheckBox(dlg, label="Show this tutorial again next startup")
+            chk.SetValue(False)
+            btn = wx.Button(dlg, wx.ID_OK, "Close")
+            btn.SetBackgroundColour(
+                self.canvas.theme.get("button_bg", wx.Colour(55, 59, 66))
+            )
+            btn.SetForegroundColour(
+                self.canvas.theme.get("text", wx.Colour(232, 234, 237))
+            )
+
+            sz.Add(txt, 0, wx.ALL, 15)
+            sz.Add(chk, 0, wx.ALL, 15)
+            sz.Add(btn, 0, wx.ALL | wx.ALIGN_CENTER, 10)
+            dlg.SetSizerAndFit(sz)
+            dlg.ShowModal()
+
+            save_preference("hide_3d_tutorial", "false" if chk.GetValue() else "true")
+
+            self.canvas.tutorial_active = False
+            self.Hide()
+            dlg.Destroy()
+        else:
+            self.canvas.tutorial_step += 1
+            self.update_step(self.canvas.tutorial_step, completed=False)
 
 
 class Canvas3D(wxcanvas.GLCanvas):
@@ -44,24 +214,38 @@ class Canvas3D(wxcanvas.GLCanvas):
         This method stores simulator state, creates the OpenGL context and
         sets the default camera, theme and plane settings.
         """
-        super().__init__(
-            parent,
-            -1,
-            attribList=[
-                wxcanvas.WX_GL_RGBA,
-                wxcanvas.WX_GL_DOUBLEBUFFER,
-                wxcanvas.WX_GL_DEPTH_SIZE,
-                16,
-                wxcanvas.WX_GL_SAMPLE_BUFFERS,
-                1,
-                wxcanvas.WX_GL_SAMPLES,
-                4,
-                0,
-            ],
-        )
-        initialise_glut_once()
+        attribs_msaa = [
+            wxcanvas.WX_GL_RGBA,
+            wxcanvas.WX_GL_DOUBLEBUFFER,
+            wxcanvas.WX_GL_DEPTH_SIZE,
+            16,
+            wxcanvas.WX_GL_SAMPLE_BUFFERS,
+            1,
+            wxcanvas.WX_GL_SAMPLES,
+            4,
+            0,
+        ]
+
+        attribs_basic = [
+            wxcanvas.WX_GL_RGBA,
+            wxcanvas.WX_GL_DOUBLEBUFFER,
+            wxcanvas.WX_GL_DEPTH_SIZE,
+            16,
+            0,
+        ]
+
+        if wxcanvas.GLCanvas.IsDisplaySupported(attribs_msaa):
+            active_attribs = attribs_msaa
+            self.multisample_enabled = True
+        else:
+            active_attribs = attribs_basic
+            self.multisample_enabled = False
+            print("Multisample anti-aliasing not supported by driver.")
+
+        # 4. Initialize the parent using the safe, verified attributes
+        super().__init__(parent, -1, attribList=active_attribs)
+
         self.init = False
-        self.multisample_enabled = True
         self.context = wxcanvas.GLContext(self)
         self.devices = devices
         self.monitors = monitors
@@ -85,6 +269,9 @@ class Canvas3D(wxcanvas.GLCanvas):
         self.camera_distance = 800.0
         self.last_mouse_x = 0
         self.last_mouse_y = 0
+        self.tutorial_active = False
+        self.tutorial_step = 0
+        self.tutorial_overlay = None
         self._needs_framing_on_show = True
         self.Bind(wx.EVT_PAINT, self.on_paint)
         self.Bind(wx.EVT_SIZE, self.on_size)
@@ -93,14 +280,52 @@ class Canvas3D(wxcanvas.GLCanvas):
         self.Bind(wx.EVT_SHOW, self.on_show)
 
     def on_show(self, event):
-        """Trigger a camera framing update when the canvas becomes visible.
+        """Trigger camera framing and tutorial prompts when visible."""
+        if event.IsShown():
+            if getattr(self, "_needs_framing_on_show", False):
+                self._needs_framing_on_show = False
+                wx.CallAfter(self.snap_reset_view)
 
-        This ensures the first visible view is scaled and centred correctly.
-        """
-        if event.IsShown() and getattr(self, "_needs_framing_on_show", False):
-            self._needs_framing_on_show = False
-            wx.CallAfter(self.snap_reset_view)
+            # Check preferences and trigger tutorial logic asynchronously
+            prefs = load_preferences()
+            if prefs.get("hide_3d_tutorial", "false") != "true":
+                wx.CallAfter(self.prompt_tutorial)
+
         event.Skip()
+
+    def prompt_tutorial(self):
+        """Show dialog and conditionally launch the tutorial."""
+        if self.tutorial_active:
+            return
+        dlg = TutorialPromptDialog(self.GetTopLevelParent(), self.theme)
+        dlg.ShowModal()
+        result = dlg.result
+        dlg.Destroy()
+
+        if result == "START":
+            self.start_tutorial()
+        elif result == "NEVER":
+            save_preference("hide_3d_tutorial", "true")
+
+    def start_tutorial(self):
+        """Begin tutorial tracking state."""
+        self.tutorial_active = True
+        self.tutorial_step = 0
+        if not self.tutorial_overlay:
+            self.tutorial_overlay = TutorialOverlay(self.GetTopLevelParent(), self)
+        self.tutorial_overlay.update_step(0)
+        self.tutorial_overlay.Show()
+        self.tutorial_overlay.reposition()
+
+    def complete_tutorial_step(self):
+        """Unlock the 'Next' button if the user fulfills the action constraint."""
+        if self.tutorial_overlay:
+            # Prevent event flooding/lag during continuous actions (like dragging)
+            # by checking if the button is already green.
+            if self.tutorial_overlay.next_btn.GetBackgroundColour() != wx.Colour(
+                67, 150, 95
+            ):
+                self.tutorial_overlay.update_step(self.tutorial_step, completed=True)
 
     def reset_view(self):
         """Reset the GL initialisation state so the next render
@@ -133,11 +358,11 @@ class Canvas3D(wxcanvas.GLCanvas):
         GL.glViewport(0, 0, vp_width, vp_height)
         GL.glMatrixMode(GL.GL_PROJECTION)
         GL.glLoadIdentity()
-        GLU.gluPerspective(45, vp_width / vp_height, 10, 10000)
+        GLU.gluPerspective(45, vp_width / vp_height, 10, 1e9)
 
         GL.glMatrixMode(GL.GL_MODELVIEW)
         GL.glLoadIdentity()
-        GLU.gluPerspective(45, size.width / size.height, 10, 10000)
+        GLU.gluPerspective(45, size.width / size.height, 10, 1e9)
         GL.glMatrixMode(GL.GL_MODELVIEW)
         GL.glLoadIdentity()
         ambient_light = [0.4, 0.4, 0.4, 1.0]
@@ -182,7 +407,7 @@ class Canvas3D(wxcanvas.GLCanvas):
 
         GL.glMatrixMode(GL.GL_PROJECTION)
         GL.glLoadIdentity()
-        GLU.gluPerspective(45, vp_width / vp_height, 10, 10000)
+        GLU.gluPerspective(45, vp_width / vp_height, 10, 1e9)
 
         GL.glMatrixMode(GL.GL_MODELVIEW)
         GL.glLoadIdentity()
@@ -247,8 +472,6 @@ class Canvas3D(wxcanvas.GLCanvas):
         """Draw text perfectly anchored in 2D screen space to avoid 3D clipping,
         FOV blind spots, and zoom scaling issues.
         """
-        if not GLUT_INITIALISED:
-            return
 
         self.SetCurrent(self.context)
         mv = GL.glGetDoublev(GL.GL_MODELVIEW_MATRIX)
@@ -339,8 +562,6 @@ class Canvas3D(wxcanvas.GLCanvas):
         """Draw text perfectly anchored in 2D screen space to the visual bottom
         of the background plane, automatically swapping sides if the camera flips.
         """
-        if not GLUT_INITIALISED:
-            return
 
         self.SetCurrent(self.context)
         mv = GL.glGetDoublev(GL.GL_MODELVIEW_MATRIX)
@@ -408,6 +629,7 @@ class Canvas3D(wxcanvas.GLCanvas):
         GL.glMatrixMode(GL.GL_MODELVIEW)
         GL.glPopMatrix()
 
+    #
     def render(self):
         """Render the complete 3D scene mapping tree hierarchy to Z/Y depth offsets."""
         self.SetCurrent(self.context)
@@ -554,7 +776,7 @@ class Canvas3D(wxcanvas.GLCanvas):
         paths = set(b["path"] for b in layout_blocks)
         if len(paths) > 1:
             GL.glDisable(GL.GL_LIGHTING)
-            GL.glLineWidth(2.0)
+            GL.glLineWidth(1.0)  # Changed bounding box width to 1.0 here
             GL.glEnable(GL.GL_LINE_STIPPLE)
             GL.glLineStipple(4, 0xAAAA)
 
@@ -630,6 +852,8 @@ class Canvas3D(wxcanvas.GLCanvas):
         self, group_name, z_depth, base_y, max_y, start_x, max_x, trace_length, step_x
     ):
         """Draw the plane label, axis line and cycle tick marks."""
+        import math
+
         GL.glDisable(GL.GL_LIGHTING)
 
         text_colour = self.theme.get("canvas_text", (1, 1, 1))
@@ -649,10 +873,53 @@ class Canvas3D(wxcanvas.GLCanvas):
         GL.glVertex3f(start_x, base_y - 10, z_depth)
         GL.glVertex3f(max_x, base_y - 10, z_depth)
 
-        # Draw tick marks on BOTH sides of the plane
+        # Reverse calculate the real 3D world position of the camera eye
+        yaw_rad = math.radians(self.camera_yaw)
+        pitch_rad = math.radians(self.camera_pitch)
+        cam_x = self.focal_x - self.camera_distance * math.cos(pitch_rad) * math.sin(
+            yaw_rad
+        )
+        cam_y = self.focal_y + self.camera_distance * math.sin(pitch_rad)
+        cam_z = self.focal_z + self.camera_distance * math.cos(pitch_rad) * math.cos(
+            yaw_rad
+        )
+
+        lod_cycles = []
+
+        # Draw tick marks dynamically calculating Level of Detail (LOD) based on camera distance
         for cycle in range(0, trace_length + 1):
-            if cycle % 5 == 0:
-                x_pos = start_x + cycle * step_x
+            x_pos = start_x + cycle * step_x
+
+            # Distance from the camera to this specific tick's position
+            dist = math.sqrt(
+                (x_pos - cam_x) ** 2 + (base_y - cam_y) ** 2 + (z_depth - cam_z) ** 2
+            )
+
+            # Density tuning: Higher divisor = denser ticks overall
+            falloff = 1.5  # higher = ticks disappear faster with distance
+            scale = 250.0  # lower = overall fewer ticks, higher = denser ticks
+
+            raw_interval = (dist / scale) ** falloff
+
+            if raw_interval < 1.0:
+                label_interval = 1
+            else:
+                magnitude = 10 ** math.floor(math.log10(raw_interval))
+                normalized = raw_interval / magnitude
+
+                # Snap to nice rounded numbers depending on decimal scale
+                if normalized < 2.0:
+                    nice = 1
+                elif normalized < 5.0:
+                    nice = 2
+                elif normalized < 8.0:
+                    nice = 5
+                else:
+                    nice = 10
+                label_interval = int(nice * magnitude)
+
+            if cycle % label_interval == 0:
+                lod_cycles.append(cycle)
                 # Bottom ticks
                 GL.glVertex3f(x_pos, base_y - 10, z_depth)
                 GL.glVertex3f(x_pos, base_y - 15, z_depth)
@@ -661,18 +928,17 @@ class Canvas3D(wxcanvas.GLCanvas):
                 GL.glVertex3f(x_pos, base_y + max_y + 15, z_depth)
         GL.glEnd()
 
-        # Delegate the cycle numbers to the adaptive bottom projector
-        for cycle in range(0, trace_length + 1):
-            if cycle % 5 == 0:
-                x_pos = start_x + cycle * step_x
-                self.draw_adaptive_bottom_text(
-                    str(cycle + self.cycle_offset),
-                    x_pos,
-                    base_y,
-                    max_y,
-                    z_depth,
-                    muted_colour,
-                )
+        # Delegate the cycle numbers using the filtered LOD cycles
+        for cycle in lod_cycles:
+            x_pos = start_x + cycle * step_x
+            self.draw_adaptive_bottom_text(
+                str(cycle + self.cycle_offset),
+                x_pos,
+                base_y,
+                max_y,
+                z_depth,
+                muted_colour,
+            )
 
         GL.glEnable(GL.GL_LIGHTING)
 
@@ -1089,8 +1355,6 @@ class Canvas3D(wxcanvas.GLCanvas):
         It disables lighting while drawing and supports simple newline
         handling.
         """
-        if not GLUT_INITIALISED:
-            return
         GL.glDisable(GL.GL_LIGHTING)
         GL.glColor3f(colour[0], colour[1], colour[2])
         GL.glRasterPos3f(x, y, z)
@@ -1125,6 +1389,8 @@ class Canvas3D(wxcanvas.GLCanvas):
         self.camera_pitch = 25.0
         self.camera_yaw = -35.0
         self._calculate_focal_and_zoom()
+        if getattr(self, "tutorial_active", False) and self.tutorial_step == 4:
+            self.complete_tutorial_step()
 
     def snap_front_view(self):
         """Set the camera to a flat front view and recalculate framing.
@@ -1137,6 +1403,8 @@ class Canvas3D(wxcanvas.GLCanvas):
         self.camera_pitch = 0.0
         self.camera_yaw = 0.0
         self._calculate_focal_and_zoom()
+        if getattr(self, "tutorial_active", False) and self.tutorial_step == 3:
+            self.complete_tutorial_step()
 
     def draw_cycle_inspector_slice(
         self, inspector_x, layout_blocks, start_x, spacing_y, amplitude_y
@@ -1265,14 +1533,23 @@ class Canvas3D(wxcanvas.GLCanvas):
         Keys F select front, R reset view, and B cycle background mode.
         """
         keycode = event.GetKeyCode()
-
         if keycode == ord("F"):
             self.snap_front_view()
+            if self.tutorial_active and self.tutorial_step == 3:
+                self.complete_tutorial_step()
         elif keycode == ord("R"):
             self.snap_reset_view()
+            if self.tutorial_active and self.tutorial_step == 4:
+                self.complete_tutorial_step()
         elif keycode == ord("B"):
             self.trace_bg_mode = (self.trace_bg_mode + 1) % 3
             self.Refresh()
+            if self.tutorial_active and self.tutorial_step == 5:
+                if not hasattr(self, "tutorial_b_presses"):
+                    self.tutorial_b_presses = 0
+                self.tutorial_b_presses += 1
+                if self.tutorial_b_presses >= 3:
+                    self.complete_tutorial_step()
 
         event.Skip()
 
@@ -1326,6 +1603,25 @@ class Canvas3D(wxcanvas.GLCanvas):
             dx = event.GetX() - self.last_mouse_x
             dy = event.GetY() - self.last_mouse_y
 
+            # --- TUTORIAL TRACKING INTERCEPTIONS ---
+            if self.tutorial_active:
+                # Step 0: Drag to orbit
+                if (
+                    self.tutorial_step == 0
+                    and not event.ShiftDown()
+                    and event.LeftIsDown()
+                    and (abs(dx) > 3 or abs(dy) > 3)
+                ):
+                    self.complete_tutorial_step()
+                # Step 1: Pan (Shift+Drag)
+                elif (
+                    self.tutorial_step == 1
+                    and event.ShiftDown()
+                    and (abs(dx) > 3 or abs(dy) > 3)
+                ):
+                    self.complete_tutorial_step()
+            # ---------------------------------------
+
             if event.ShiftDown():
                 speed = self.camera_distance / 1000.0
                 yaw_rad = np.radians(self.camera_yaw)
@@ -1344,10 +1640,13 @@ class Canvas3D(wxcanvas.GLCanvas):
 
         wheel = event.GetWheelRotation()
         if wheel != 0:
+            # Step 2: Zoom (Scroll wheel)
+            if self.tutorial_active and self.tutorial_step == 2:
+                self.complete_tutorial_step()
+
             hit = self.get_world_on_focal_plane(event.GetX(), event.GetY())
             factor = 0.9 if wheel > 0 else 1.1
 
-            # Clamp zoom to prevent clipping through the near-plane and causing projection inversion
             if self.camera_distance * factor > 20.0:
                 self.camera_distance *= factor
                 if hit:
