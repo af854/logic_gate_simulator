@@ -70,9 +70,21 @@ def _get_active_canvas(gui: Any) -> Any:
     """Return the active canvas for real GUI or test double instances."""
     if hasattr(gui, "canvas"):
         return gui.canvas
-    if hasattr(gui, "view_3d_menu_item") and gui.view_3d_menu_item.IsChecked():
+
+    if (
+        hasattr(gui, "view_3d_menu_item")
+        and gui.view_3d_menu_item.IsChecked()
+        and getattr(gui, "canvas_3d", None) is not None
+    ):
         return gui.canvas_3d
-    return gui.canvas_2d
+
+    if getattr(gui, "canvas_2d", None) is not None:
+        return gui.canvas_2d
+
+    if getattr(gui, "canvas_3d", None) is not None:
+        return gui.canvas_3d
+
+    raise RuntimeError("No active canvas exists")
 
 
 # GLUT is initialised once to avoid repeated initialisation warnings on macOS.
@@ -1559,13 +1571,11 @@ class Gui(wx.Frame):
         self.CreateStatusBar()
         self.SetStatusText(_("Ready"))
 
-        # Canvases for drawing signals
+        # Canvas for drawing signals.  Create only one at a time
+        # to prevent hang when switching between 2D and 3D modes.
         self.canvas_2d = MyGLCanvas(self, devices, monitors)
         self.canvas_2d.SetMinSize((500, 420))
-
-        self.canvas_3d = Canvas3D(self, devices, monitors)
-        self.canvas_3d.SetMinSize((500, 420))
-        self.canvas_3d.Hide()
+        self.canvas_3d = None
 
         # Configure the widgets
         self.text = wx.StaticText(self, wx.ID_ANY, _("Cycles to run"))
@@ -1921,9 +1931,9 @@ class Gui(wx.Frame):
         self.set_cycle_inspector_order()
         self.cycle_inspector_panel.SetSizer(self.inspector_sizer)
 
-        # Add both canvases to the layout
+        # Add the active canvas to the layout. 
+        self.canvas_sizer = canvas_sizer
         canvas_sizer.Add(self.canvas_2d, 1, wx.EXPAND)
-        canvas_sizer.Add(self.canvas_3d, 1, wx.EXPAND)
         canvas_sizer.Add(
             self.cycle_inspector_panel,
             0,
@@ -2219,10 +2229,9 @@ class Gui(wx.Frame):
         self.cycles_completed = simulation_snapshot["cycles_completed"]
         self.total_cycles_completed = simulation_snapshot["total_cycles_completed"]
         for canvas_name in ("canvas", "canvas_2d", "canvas_3d"):
-            if hasattr(self, canvas_name):
-                getattr(self, canvas_name).cycle_offset = simulation_snapshot[
-                    "cycle_offset"
-                ]
+            canvas = getattr(self, canvas_name, None)
+            if canvas is not None:
+                canvas.cycle_offset = simulation_snapshot["cycle_offset"]
         self.update_cycles_completed_text()
         self.update_cycle_inspector_range()
 
@@ -2277,9 +2286,11 @@ class Gui(wx.Frame):
             self.cycle_inspector_slider.Enable(False)
             self.cycle_inspector_entry.SetValue("-")
             self.cycle_inspector_entry.Enable(False)
+
             for canvas_name in ("canvas", "canvas_2d", "canvas_3d"):
-                if hasattr(self, canvas_name):
-                    getattr(self, canvas_name).cycle_inspector_index = 0
+                canvas = getattr(self, canvas_name, None)
+                if canvas is not None:
+                    canvas.cycle_inspector_index = 0
             return
 
         max_index = max_trace_length - 1
@@ -2296,8 +2307,9 @@ class Gui(wx.Frame):
         self.cycle_inspector_slider.Enable(True)
         self.cycle_inspector_entry.Enable(True)
         for canvas_name in ("canvas", "canvas_2d", "canvas_3d"):
-            if hasattr(self, canvas_name):
-                getattr(self, canvas_name).cycle_inspector_index = current_index
+            canvas = getattr(self, canvas_name, None)
+            if canvas is not None:
+                canvas.cycle_inspector_index = current_index
         self.update_cycle_inspector_label()
 
     def update_cycle_inspector_label(self) -> None:
@@ -2346,8 +2358,9 @@ class Gui(wx.Frame):
             cycle_index = max_trace_length - 1
 
         for canvas_name in ("canvas", "canvas_2d", "canvas_3d"):
-            if hasattr(self, canvas_name):
-                getattr(self, canvas_name).cycle_inspector_index = cycle_index
+            canvas = getattr(self, canvas_name, None)
+            if canvas is not None:
+                canvas.cycle_inspector_index = cycle_index
         self.cycle_inspector_slider.SetValue(cycle_index + 1)
         self.update_cycle_inspector_label()
 
@@ -2751,26 +2764,56 @@ class Gui(wx.Frame):
         self.show_status(_("Redid 1 cycle."))
 
     def on_toggle_3d(self, event: wx.CommandEvent) -> None:
-        """Switch between 2D and 3D canvas modes seamlessly."""
+        """Switch between 2D and 3D canvas modes by recreating the GLCanvas."""
         is_3d = self.view_3d_menu_item.IsChecked()
 
-        if is_3d:
-            self.canvas_3d.Show()
-            self.canvas_3d.SetCurrent(self.canvas_3d.context)
-            self.canvas_2d.Hide()
-            self.show_status(_("Switched to 3D view"))
+        if self.canvas_3d is not None:
+            old_canvas = self.canvas_3d
         else:
-            self.canvas_2d.Show()
-            self.canvas_2d.SetCurrent(self.canvas_2d.context)
-            self.canvas_3d.Hide()
-            self.show_status(_("Switched to 2D trace view"))
+            old_canvas = self.canvas_2d
 
+        # Preserve shared view state where both canvases have matching attributes.
+        old_cycle_offset = getattr(old_canvas, "cycle_offset", 0)
+        old_cycle_inspector_enabled = getattr(old_canvas, "cycle_inspector_enabled", False)
+        old_cycle_inspector_index = getattr(old_canvas, "cycle_inspector_index", 0)
+
+        if old_canvas is not None:
+            self.canvas_sizer.Detach(old_canvas)
+            old_canvas.Destroy()
+
+        if is_3d:
+            self.canvas_3d = Canvas3D(self, self.devices, self.monitors)
+            self.canvas_3d.SetMinSize((500, 420))
+            self.canvas_3d.theme = self.theme
+            self.canvas_3d.cycle_offset = old_cycle_offset
+            self.canvas_3d.cycle_inspector_enabled = old_cycle_inspector_enabled
+            self.canvas_3d.cycle_inspector_index = old_cycle_inspector_index
+            self.canvas_2d = None
+            new_canvas = self.canvas_3d
+            message = _("Switched to 3D view")
+        else:
+            self.canvas_2d = MyGLCanvas(self, self.devices, self.monitors)
+            self.canvas_2d.SetMinSize((500, 420))
+            self.canvas_2d.theme = self.theme
+            self.canvas_2d.apply_no_monitor_label_theme()
+            self.canvas_2d.cycle_offset = old_cycle_offset
+            self.canvas_2d.cycle_inspector_enabled = old_cycle_inspector_enabled
+            self.canvas_2d.cycle_inspector_index = old_cycle_inspector_index
+            self.canvas_3d = None
+            new_canvas = self.canvas_2d
+            message = _("Switched to 2D trace view")
+
+        self.canvas_sizer.Insert(0, new_canvas, 1, wx.EXPAND)
         self.Layout()
-        self.Refresh()
+
+        new_canvas.Refresh()
+        self.show_status(message)
 
     def on_toggle_multisample(self, event: wx.CommandEvent) -> None:
         """Toggle multisample antialiasing for the 3D canvas."""
-        if not hasattr(self, "canvas_3d"):
+        if self.canvas_3d is None:
+            self.view_aa_menu_item.Check(False)
+            self.show_status(_("3D anti-aliasing can only be changed in 3D view."))
             return
 
         new_state = not self.canvas_3d.multisample_enabled
@@ -2796,8 +2839,9 @@ class Gui(wx.Frame):
         self.cycles_completed = 0
         self.total_cycles_completed = 0
         for canvas_name in ("canvas", "canvas_2d", "canvas_3d"):
-            if hasattr(self, canvas_name):
-                getattr(self, canvas_name).cycle_offset = 0
+            canvas = getattr(self, canvas_name, None)
+            if canvas is not None:
+                canvas.cycle_offset = 0
         self.cycle_history = []
         self.cycle_redo_history = []
         self.update_cycles_completed_text()
@@ -2831,8 +2875,9 @@ class Gui(wx.Frame):
         self.monitors.reset_monitors()
         self.cycles_completed = 0
         for canvas_name in ("canvas", "canvas_2d", "canvas_3d"):
-            if hasattr(self, canvas_name):
-                getattr(self, canvas_name).cycle_offset = self.total_cycles_completed
+            canvas = getattr(self, canvas_name, None)
+            if canvas is not None:
+                canvas.cycle_offset = self.total_cycles_completed
         self.cycle_history = []
         self.cycle_redo_history = []
         self.update_cycles_completed_text()
@@ -2887,10 +2932,9 @@ class Gui(wx.Frame):
         """Show or hide the cycle inspector controls and canvas cursor."""
         inspector_is_visible = self.cycle_inspector_menu_item.IsChecked()
         for canvas_name in ("canvas", "canvas_2d", "canvas_3d"):
-            if hasattr(self, canvas_name):
-                getattr(
-                    self, canvas_name
-                ).cycle_inspector_enabled = inspector_is_visible
+            canvas = getattr(self, canvas_name, None)
+            if canvas is not None:
+                canvas.cycle_inspector_enabled = inspector_is_visible
 
         if inspector_is_visible:
             self.update_cycle_inspector_range()
@@ -3058,7 +3102,7 @@ class Gui(wx.Frame):
         self.view_3d_menu_item = view_menu.AppendCheckItem(
             ID_TOGGLE_3D, _("Enable 3D view\tCtrl+D")
         )
-        self.view_3d_menu_item.Check(self.canvas_3d.IsShown())
+        self.view_3d_menu_item.Check(self.canvas_3d is not None)
         self.view_aa_menu_item = view_menu.AppendCheckItem(
             ID_TOGGLE_MULTISAMPLE, _("Enable 3D anti-aliasing")
         )
@@ -3525,11 +3569,16 @@ class Gui(wx.Frame):
 
         # Canvases cache colours and OpenGL projection state, so update their
         # palette and mark them for a fresh projection before repainting
-        self.canvas_2d.theme = self.theme
-        self.canvas_2d.apply_no_monitor_label_theme()
-        self.canvas_2d.init = False
-        self.canvas_3d.theme = self.theme
-        self.canvas_3d.init = False
+        canvas_2d = getattr(self, "canvas_2d", None)
+        if canvas_2d is not None:
+            canvas_2d.theme = self.theme
+            canvas_2d.apply_no_monitor_label_theme()
+            canvas_2d.init = False
+
+        canvas_3d = getattr(self, "canvas_3d", None)
+        if canvas_3d is not None:
+            canvas_3d.theme = self.theme
+            canvas_3d.init = False
 
         if self.theme_name == "dark":
             # Icons are paired with the theme so the toolbar keeps enough
@@ -3910,15 +3959,17 @@ class Gui(wx.Frame):
         self.cycle_redo_history = []
         self.module_signal_expanded_paths = set()
 
-        self.canvas_2d.devices = devices
-        self.canvas_2d.monitors = monitors
-        self.canvas_2d.cycle_offset = 0
-        self.canvas_2d.reset_view()
+        if self.canvas_2d is not None:
+            self.canvas_2d.devices = devices
+            self.canvas_2d.monitors = monitors
+            self.canvas_2d.cycle_offset = 0
+            self.canvas_2d.reset_view()
 
-        self.canvas_3d.devices = devices
-        self.canvas_3d.monitors = monitors
-        self.canvas_3d.cycle_offset = 0
-        self.canvas_3d.snap_reset_view()
+        if self.canvas_3d is not None:
+            self.canvas_3d.devices = devices
+            self.canvas_3d.monitors = monitors
+            self.canvas_3d.cycle_offset = 0
+            self.canvas_3d.snap_reset_view()
 
         self.update_cycles_completed_text()
         self.update_module_signal_rows()
