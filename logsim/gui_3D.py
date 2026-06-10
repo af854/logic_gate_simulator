@@ -85,28 +85,44 @@ class TutorialOverlay(wx.Frame):
     def __init__(self, parent, canvas):
         super().__init__(
             parent,
-            style=wx.FRAME_FLOAT_ON_PARENT | wx.BORDER_SIMPLE | wx.FRAME_NO_TASKBAR,
+            # Remove the border from the Frame, GTK ignores it here anyway
+            style=wx.FRAME_FLOAT_ON_PARENT | wx.BORDER_NONE | wx.FRAME_NO_TASKBAR,
         )
         self.canvas = canvas
-        self.SetBackgroundColour(canvas.theme.get("panel_bg", wx.Colour(43, 46, 51)))
-        self.SetForegroundColour(canvas.theme.get("text", wx.Colour(232, 234, 237)))
+
+        # --- CREATE A WRAPPER PANEL ---
+        # Apply the border strictly to the internal panel
+        self.main_panel = wx.Panel(self, style=wx.BORDER_SIMPLE)
+        self.main_panel.SetBackgroundColour(
+            canvas.theme.get("panel_bg", wx.Colour(43, 46, 51))
+        )
+        self.main_panel.SetForegroundColour(
+            canvas.theme.get("text", wx.Colour(232, 234, 237))
+        )
 
         self.sizer = wx.BoxSizer(wx.VERTICAL)
-        self.instruction_label = wx.StaticText(self, label="Loading...")
+
+        # Parent all widgets to `self.main_panel` instead of `self`
+        self.instruction_label = wx.StaticText(self.main_panel, label="Loading...")
         font = self.instruction_label.GetFont()
         font.SetWeight(wx.FONTWEIGHT_BOLD)
         self.instruction_label.SetFont(font)
         self.sizer.Add(self.instruction_label, 0, wx.ALL | wx.ALIGN_CENTER, 10)
 
-        # Gauge range reduced to 6 due to combining the orbit steps
-        self.gauge = wx.Gauge(self, range=6, size=(250, 15))
+        self.gauge = wx.Gauge(self.main_panel, range=6, size=(250, 15))
         self.sizer.Add(self.gauge, 0, wx.ALL | wx.ALIGN_CENTER, 5)
 
-        self.next_btn = wx.Button(self, label="Next")
+        self.next_btn = wx.Button(self.main_panel, label="Next")
         self.next_btn.Bind(wx.EVT_BUTTON, self.on_next)
         self.sizer.Add(self.next_btn, 0, wx.ALL | wx.ALIGN_CENTER, 5)
 
-        self.SetSizerAndFit(self.sizer)
+        self.main_panel.SetSizer(self.sizer)
+
+        # Apply a master sizer to the Frame to expand the wrapper panel
+        frame_sizer = wx.BoxSizer(wx.VERTICAL)
+        frame_sizer.Add(self.main_panel, 1, wx.EXPAND)
+        self.SetSizerAndFit(frame_sizer)
+
         canvas.Bind(wx.EVT_SIZE, self.on_canvas_size)
 
     def on_canvas_size(self, event):
@@ -198,6 +214,7 @@ class TutorialOverlay(wx.Frame):
         else:
             self.canvas.tutorial_step += 1
             self.update_step(self.canvas.tutorial_step, completed=False)
+            self.canvas.SetFocus()
 
 
 class Canvas3D(wxcanvas.GLCanvas):

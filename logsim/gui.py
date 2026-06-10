@@ -388,16 +388,35 @@ class MyGLCanvas(wxcanvas.GLCanvas):
         values, and binds paint, resize, and mouse events
 
         """
+        attribs_msaa = [
+            wxcanvas.WX_GL_RGBA,
+            wxcanvas.WX_GL_DOUBLEBUFFER,
+            wxcanvas.WX_GL_DEPTH_SIZE,
+            16,
+            wxcanvas.WX_GL_SAMPLE_BUFFERS,
+            1,
+            wxcanvas.WX_GL_SAMPLES,
+            4,
+            0,
+        ]
+
+        attribs_basic = [
+            wxcanvas.WX_GL_RGBA,
+            wxcanvas.WX_GL_DOUBLEBUFFER,
+            wxcanvas.WX_GL_DEPTH_SIZE,
+            16,
+            0,
+        ]
+
+        if wxcanvas.GLCanvas.IsDisplaySupported(attribs_msaa):
+            active_attribs = attribs_msaa
+        else:
+            active_attribs = attribs_basic
+
         super().__init__(
             parent,
             -1,
-            attribList=[
-                wxcanvas.WX_GL_RGBA,
-                wxcanvas.WX_GL_DOUBLEBUFFER,
-                wxcanvas.WX_GL_DEPTH_SIZE,
-                16,
-                0,
-            ],
+            attribList=active_attribs,
         )
         _initialise_glut_once()
         self.init = False
@@ -3111,6 +3130,10 @@ class Gui(wx.Frame):
             ("help", help_menu, "&Help"),
         ]
         self.update_menu_bar_order()
+        old_menu_bar = self.GetMenuBar()
+        if old_menu_bar:
+            self.SetMenuBar(None)
+            old_menu_bar.Destroy()
         self.SetMenuBar(menu_bar)
         if hasattr(self, "theme"):
             self.menu_bar.SetBackgroundColour(self.theme["frame_bg"])
