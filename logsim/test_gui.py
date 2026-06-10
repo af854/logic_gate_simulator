@@ -36,8 +36,12 @@ class DummyGui:
     run_cycles = Gui.run_cycles
     get_simulation_snapshot = Gui.get_simulation_snapshot
     restore_simulation_snapshot = Gui.restore_simulation_snapshot
+    record_history_snapshot = Gui.record_history_snapshot
+    refresh_after_history_restore = Gui.refresh_after_history_restore
     on_undo_cycle = Gui.on_undo_cycle
     on_redo_cycle = Gui.on_redo_cycle
+    on_undo_last_cycle = Gui.on_undo_last_cycle
+    on_redo_last_cycle = Gui.on_redo_last_cycle
     start_live_trace = Gui.start_live_trace
     resume_live_trace = Gui.resume_live_trace
     stop_live_trace = Gui.stop_live_trace
@@ -433,6 +437,8 @@ def new_gui():
     new_gui.total_cycles_completed = 0
     new_gui.simulation_history = []
     new_gui.redo_history = []
+    new_gui.cycle_history = []
+    new_gui.cycle_redo_history = []
     new_gui.live_trace_running = False
     new_gui.live_trace_target_cycles = 0
     new_gui.live_trace_cycles_completed = 0
@@ -521,7 +527,7 @@ def test_run_cycles(new_gui):
 
 
 def test_undo_cycle_restores_previous_state(new_gui):
-    """Test undoing one simulated cycle from the GUI."""
+    """Test undoing one run action from the GUI."""
     new_gui.run_cycles(2)
 
     assert new_gui.total_cycles_completed == 2
@@ -532,17 +538,17 @@ def test_undo_cycle_restores_previous_state(new_gui):
 
     new_gui.on_undo_cycle(None)
 
-    assert new_gui.total_cycles_completed == 1
-    assert new_gui.cycles_completed == 1
+    assert new_gui.total_cycles_completed == 0
+    assert new_gui.cycles_completed == 0
     assert new_gui.switch_rows_refreshed == 1
     assert new_gui.switch_rows_rebuilt == 0
-    assert new_gui.monitors.monitors_dictionary["Or1"].trace == [new_gui.devices.HIGH]
-    assert new_gui.cycles_completed_text.text == "Cycles passed: 1"
-    assert new_gui.status_messages[-1] == "Undid 1 cycle."
+    assert new_gui.monitors.monitors_dictionary["Or1"].trace == []
+    assert new_gui.cycles_completed_text.text == "Cycles passed: 0"
+    assert new_gui.status_messages[-1] == "Undid last action."
 
 
 def test_redo_cycle_restores_undone_state(new_gui):
-    """Test redoing one cycle after undo."""
+    """Test redoing one run action after undo."""
     new_gui.run_cycles(2)
     new_gui.on_undo_cycle(None)
     new_gui.on_redo_cycle(None)
@@ -556,6 +562,36 @@ def test_redo_cycle_restores_undone_state(new_gui):
         new_gui.devices.HIGH,
     ]
     assert new_gui.cycles_completed_text.text == "Cycles passed: 2"
+    assert new_gui.status_messages[-1] == "Redid last action."
+
+
+def test_arrow_undo_cycle_restores_previous_cycle(new_gui):
+    """Test the arrow-key undo handler removes one cycle."""
+    new_gui.run_cycles(2)
+
+    new_gui.on_undo_last_cycle(None)
+
+    assert new_gui.total_cycles_completed == 1
+    assert new_gui.cycles_completed == 1
+    assert new_gui.monitors.monitors_dictionary["Or1"].trace == [
+        new_gui.devices.HIGH
+    ]
+    assert new_gui.status_messages[-1] == "Undid 1 cycle."
+
+
+def test_arrow_redo_cycle_restores_removed_cycle(new_gui):
+    """Test the arrow-key redo handler restores one removed cycle."""
+    new_gui.run_cycles(2)
+    new_gui.on_undo_last_cycle(None)
+
+    new_gui.on_redo_last_cycle(None)
+
+    assert new_gui.total_cycles_completed == 2
+    assert new_gui.cycles_completed == 2
+    assert new_gui.monitors.monitors_dictionary["Or1"].trace == [
+        new_gui.devices.HIGH,
+        new_gui.devices.HIGH,
+    ]
     assert new_gui.status_messages[-1] == "Redid 1 cycle."
 
 
@@ -570,7 +606,7 @@ def test_running_after_undo_clears_redo_history(new_gui):
 
     assert new_gui.redo_history == []
     new_gui.on_redo_cycle(None)
-    assert new_gui.status_messages[-1] == "Error: no simulation cycle to redo."
+    assert new_gui.status_messages[-1] == "Error: no action to redo."
 
 
 def test_run_cycles_zero_is_not_allowed(new_gui):
@@ -639,6 +675,24 @@ def test_live_trace_start_and_timer_tick(new_gui):
     assert new_gui.live_trace_cycles_completed == 1
     assert new_gui.canvas.times_rendered == 1
     assert new_gui.status_bar_message == "Live tracing: 1/2 cycles"
+
+
+def test_undo_live_trace_restores_state_before_trace(new_gui):
+    """Test live tracing is undone as one user action."""
+    new_gui.spin.SetValue(3)
+    new_gui.start_live_trace()
+
+    for _ in range(3):
+        new_gui.on_live_trace_timer(None)
+
+    assert new_gui.total_cycles_completed == 3
+
+    new_gui.on_undo_cycle(None)
+
+    assert new_gui.total_cycles_completed == 0
+    assert new_gui.cycles_completed == 0
+    assert new_gui.monitors.monitors_dictionary["Or1"].trace == []
+    assert new_gui.status_messages[-1] == "Undid last action."
 
 
 def test_live_trace_keeps_latest_cycle_visible(new_gui):
@@ -947,6 +1001,30 @@ def test_add_monitor(new_gui):
     assert new_gui.canvas.times_rendered == 1
 
 
+def test_undo_redo_add_monitor_action(new_gui):
+    """Test undo and redo restore monitor additions."""
+    new_gui.run_cycles(2)
+    new_gui.add_monitor_by_name("Sw1")
+
+    assert "Sw1" in new_gui.monitors.monitors_dictionary
+
+    new_gui.on_undo_cycle(None)
+
+    assert "Sw1" not in new_gui.monitors.monitors_dictionary
+    assert new_gui.monitors.monitors_dictionary["Or1"].trace == [
+        new_gui.devices.HIGH,
+        new_gui.devices.HIGH,
+    ]
+
+    new_gui.on_redo_cycle(None)
+
+    assert "Sw1" in new_gui.monitors.monitors_dictionary
+    assert new_gui.monitors.monitors_dictionary["Sw1"].trace == [
+        new_gui.devices.BLANK,
+        new_gui.devices.BLANK,
+    ]
+
+
 def test_add_same_monitor_twice(new_gui):
     """Test the message shown when the same monitor is added twice.
 
@@ -1058,8 +1136,33 @@ def test_set_switch_value(new_gui):
 
     new_gui.set_switch_value("Sw1", new_gui.devices.HIGH)
 
-    assert new_gui.devices.get_device(SW1_ID).switch_state == new_gui.devices.HIGH
+    assert (
+        new_gui.devices.get_device(SW1_ID).switch_state
+        == new_gui.devices.HIGH
+    )
     assert new_gui.status_messages[-1] == "Set switch Sw1 to HIGH."
+
+
+def test_undo_redo_switch_action(new_gui):
+    """Test undo and redo restore a switch change as one action."""
+    [SW1_ID] = new_gui.names.lookup(["Sw1"])
+
+    new_gui.set_switch_value("Sw1", new_gui.devices.HIGH)
+    new_gui.on_undo_cycle(None)
+
+    assert (
+        new_gui.devices.get_device(SW1_ID).switch_state
+        == new_gui.devices.LOW
+    )
+    assert new_gui.status_messages[-1] == "Undid last action."
+
+    new_gui.on_redo_cycle(None)
+
+    assert (
+        new_gui.devices.get_device(SW1_ID).switch_state
+        == new_gui.devices.HIGH
+    )
+    assert new_gui.status_messages[-1] == "Redid last action."
 
 
 def test_set_switch_value_does_not_pause_live_trace(new_gui):
@@ -1111,6 +1214,27 @@ def test_clear_traces_keeps_total_cycle_count(new_gui):
     assert new_gui.status_messages[-1] == "Cleared traces."
 
 
+def test_undo_redo_clear_traces_action(new_gui):
+    """Test undo and redo restore a clear-traces action."""
+    new_gui.run_cycles(2)
+    new_gui.on_clear_traces(None)
+
+    new_gui.on_undo_cycle(None)
+
+    assert new_gui.cycles_completed == 2
+    assert new_gui.total_cycles_completed == 2
+    assert new_gui.monitors.monitors_dictionary["Or1"].trace == [
+        new_gui.devices.HIGH,
+        new_gui.devices.HIGH,
+    ]
+
+    new_gui.on_redo_cycle(None)
+
+    assert new_gui.cycles_completed == 0
+    assert new_gui.total_cycles_completed == 2
+    assert new_gui.monitors.monitors_dictionary["Or1"].trace == []
+
+
 def test_reset_button_clears_simulation_state(new_gui):
     """Test resetting the simulation from the GUI.
 
@@ -1127,6 +1251,27 @@ def test_reset_button_clears_simulation_state(new_gui):
     assert new_gui.cycles_completed_text.text == "Cycles passed: 0"
     assert new_gui.monitors.monitors_dictionary["Or1"].trace == []
     assert new_gui.status_messages[-1] == "Reset simulation."
+
+
+def test_undo_redo_reset_action(new_gui):
+    """Test undo and redo restore a reset action."""
+    new_gui.run_cycles(2)
+    new_gui.on_reset_button(None)
+
+    new_gui.on_undo_cycle(None)
+
+    assert new_gui.cycles_completed == 2
+    assert new_gui.total_cycles_completed == 2
+    assert new_gui.monitors.monitors_dictionary["Or1"].trace == [
+        new_gui.devices.HIGH,
+        new_gui.devices.HIGH,
+    ]
+
+    new_gui.on_redo_cycle(None)
+
+    assert new_gui.cycles_completed == 0
+    assert new_gui.total_cycles_completed == 0
+    assert new_gui.monitors.monitors_dictionary["Or1"].trace == []
 
 
 def test_clear_status(new_gui):

@@ -167,6 +167,8 @@ ID_RUN_ONE = wx.NewIdRef()
 ID_TOGGLE_LIVE_TRACE = wx.NewIdRef()
 ID_UNDO_CYCLE = wx.NewIdRef()
 ID_REDO_CYCLE = wx.NewIdRef()
+ID_UNDO_LAST_CYCLE = wx.NewIdRef()
+ID_REDO_LAST_CYCLE = wx.NewIdRef()
 ID_HELP = wx.NewIdRef()
 ID_HELP_SHORTCUTS = wx.NewIdRef()
 ID_HELP_SYNTAX = wx.NewIdRef()
@@ -1443,6 +1445,8 @@ class Gui(wx.Frame):
 
         self.simulation_history = []
         self.redo_history = []
+        self.cycle_history = []
+        self.cycle_redo_history = []
 
         self.live_trace_running = False
         self.live_trace_target_cycles = 0
@@ -1780,6 +1784,8 @@ class Gui(wx.Frame):
         )
         self.Bind(wx.EVT_MENU, self.on_undo_cycle, id=ID_UNDO_CYCLE)
         self.Bind(wx.EVT_MENU, self.on_redo_cycle, id=ID_REDO_CYCLE)
+        self.Bind(wx.EVT_MENU, self.on_undo_last_cycle, id=ID_UNDO_LAST_CYCLE)
+        self.Bind(wx.EVT_MENU, self.on_redo_last_cycle, id=ID_REDO_LAST_CYCLE)
         self.Bind(wx.EVT_MENU, self.on_clear_status, id=ID_CLEAR_STATUS)
         self.Bind(wx.EVT_MENU, self.on_reset_view, id=ID_RESET_VIEW)
         self.Bind(
@@ -1809,7 +1815,8 @@ class Gui(wx.Frame):
         accelerators = wx.AcceleratorTable(
             [
                 (wx.ACCEL_NORMAL, wx.WXK_SPACE, ID_RUN),
-                (wx.ACCEL_NORMAL, wx.WXK_RIGHT, ID_RUN_ONE),
+                (wx.ACCEL_NORMAL, wx.WXK_LEFT, ID_UNDO_LAST_CYCLE),
+                (wx.ACCEL_NORMAL, wx.WXK_RIGHT, ID_REDO_LAST_CYCLE),
                 (wx.ACCEL_CTRL, wx.WXK_SPACE, ID_TOGGLE_LIVE_TRACE),
                 (wx.ACCEL_CTRL, ord("Z"), ID_UNDO_CYCLE),
                 (wx.ACCEL_CTRL, ord("Y"), ID_REDO_CYCLE),
@@ -2058,10 +2065,11 @@ class Gui(wx.Frame):
             _(
                 "F1: Quick start help\n"
                 "Space: Run the selected number of cycles\n"
-                "Right arrow: Run one cycle\n"
+                "Left arrow: Undo one cycle\n"
+                "Right arrow: Redo one cycle\n"
                 "Ctrl+Space: Play or pause live tracing\n"
-                "Ctrl+Z: Undo one cycle\n"
-                "Ctrl+Y: Redo one cycle\n"
+                "Ctrl+Z: Undo last action\n"
+                "Ctrl+Y: Redo last action\n"
                 "Ctrl+O: Open a circuit file\n"
                 "Ctrl+=: Zoom in\n"
                 "Ctrl+-: Zoom out\n"
@@ -2113,7 +2121,7 @@ class Gui(wx.Frame):
                 _("Error: could not open external documentation.")
             )
 
-    def run_cycles(self, cycles: int) -> bool:
+    def run_cycles(self, cycles: int, record_history: bool = True) -> bool:
         """Run the simulator and record monitor outputs.
 
         Arguments:
@@ -2121,10 +2129,10 @@ class Gui(wx.Frame):
 
         Return True if all cycles executed successfully, otherwise False.
 
-        Clears redo history, records one undo snapshot per cycle, records
-        monitor traces, updates cycle counters, and refreshes inspector/history
+        Records one undo snapshot for the whole run action, records monitor
+        traces, updates cycle counters, and refreshes inspector/history
         controls. If network execution fails, restores the snapshot from before
-        the failed cycle.
+        the failed run.
 
         """
         if cycles <= 0:
@@ -2139,23 +2147,27 @@ class Gui(wx.Frame):
             )
             return False
 
-        self.redo_history = []
+        action_snapshot = self.get_simulation_snapshot()
 
         # Run one cycle at a time and record the monitored signals
         for cycle_index in range(cycles):
-            simulation_snapshot = self.get_simulation_snapshot()
+            cycle_snapshot = self.get_simulation_snapshot()
             if not self.network.execute_network():
-                self.restore_simulation_snapshot(simulation_snapshot)
+                self.restore_simulation_snapshot(action_snapshot)
                 self.show_status(
                     _("Error: network failed to reach a steady state.")
                 )
                 return False
 
             self.monitors.record_signals()
-            self.simulation_history.append(simulation_snapshot)
+            self.cycle_history.append(cycle_snapshot)
             self.cycles_completed += 1
             self.total_cycles_completed += 1
 
+        self.cycle_redo_history = []
+        if record_history:
+            self.simulation_history.append(action_snapshot)
+            self.redo_history = []
         self.update_cycles_completed_text()
         self.update_history_buttons()
         self.update_cycle_inspector_range()
@@ -2186,15 +2198,22 @@ class Gui(wx.Frame):
                 }
             )
 
-        monitor_traces = {}
+        monitor_snapshots = []
         for monitor_name, monitor in self.monitors.monitors_dictionary.items():
             # Copy trace lists so future simulation steps cannot mutate the
             # history entry through a shared list reference
-            monitor_traces[monitor_name] = list(monitor.trace)
+            monitor_snapshots.append(
+                {
+                    "requested_name": monitor_name,
+                    "device_id": monitor.device_id,
+                    "output_id": monitor.output_id,
+                    "trace": list(monitor.trace),
+                }
+            )
 
         return {
             "devices": device_snapshots,
-            "monitor_traces": monitor_traces,
+            "monitors": monitor_snapshots,
             "cycles_completed": self.cycles_completed,
             "total_cycles_completed": self.total_cycles_completed,
             "cycle_offset": _get_active_canvas(self).cycle_offset,
@@ -2224,12 +2243,18 @@ class Gui(wx.Frame):
                 device.switch_state = device_snapshot["switch_state"]
                 device.dtype_memory = device_snapshot["dtype_memory"]
 
-        for monitor_name, trace in simulation_snapshot[
-            "monitor_traces"
-        ].items():
-            monitor = self.monitors.monitors_dictionary.get(monitor_name)
-            if monitor is not None:
-                monitor.trace = list(trace)
+        self.monitors.monitors_dictionary.clear()
+        for monitor_snapshot in simulation_snapshot.get("monitors", []):
+            error_type = self.monitors.make_monitor(
+                monitor_snapshot["device_id"],
+                monitor_snapshot["output_id"],
+                requested_name=monitor_snapshot["requested_name"],
+            )
+            if error_type == self.monitors.NO_ERROR:
+                monitor = self.monitors.monitors_dictionary[
+                    monitor_snapshot["requested_name"]
+                ]
+                monitor.trace = list(monitor_snapshot["trace"])
 
         self.cycles_completed = simulation_snapshot["cycles_completed"]
         self.total_cycles_completed = simulation_snapshot[
@@ -2242,6 +2267,23 @@ class Gui(wx.Frame):
                 ]
         self.update_cycles_completed_text()
         self.update_cycle_inspector_range()
+
+    def record_history_snapshot(self) -> None:
+        """Save the current simulator state before a user action changes it."""
+        self.simulation_history.append(self.get_simulation_snapshot())
+        self.redo_history = []
+        self.update_history_buttons()
+
+    def refresh_after_history_restore(self) -> None:
+        """Refresh panels that reflect simulator state after undo or redo."""
+        self.cycle_history = []
+        self.cycle_redo_history = []
+        self.refresh_switch_rows()
+        self.update_monitor_rows()
+        self.update_module_signal_rows()
+        self.update_cycle_inspector_range()
+        _get_active_canvas(self).render()
+        self.update_history_buttons()
 
     def update_history_buttons(self) -> None:
         """Enable undo and redo when their history stacks have entries."""
@@ -2552,6 +2594,7 @@ class Gui(wx.Frame):
             self.show_status(_("Error: number of cycles must be positive."))
             return False
 
+        self.record_history_snapshot()
         self.live_trace_target_cycles = cycles
         self.live_trace_cycles_completed = 0
         self.live_trace_paused = False
@@ -2690,7 +2733,7 @@ class Gui(wx.Frame):
             self.show_status(_("Error: network is incomplete."))
             return
 
-        if not self.run_cycles(1):
+        if not self.run_cycles(1, record_history=False):
             self.stop_live_trace()
             self.SetStatusText(_("Live tracing stopped"))
             return
@@ -2713,33 +2756,57 @@ class Gui(wx.Frame):
             self.SetStatusText(message)
 
     def on_undo_cycle(self, event: wx.CommandEvent) -> None:
-        """Restore the simulator state from before the most recent cycle."""
+        """Restore the simulator state from before the most recent action."""
         self.stop_live_trace()
         if not self.simulation_history:
-            self.show_status(_("Error: no simulation cycle to undo."))
+            self.show_status(_("Error: no action to undo."))
             return
 
         self.redo_history.append(self.get_simulation_snapshot())
         simulation_snapshot = self.simulation_history.pop()
         self.restore_simulation_snapshot(simulation_snapshot)
-        self.refresh_switch_rows()
-        _get_active_canvas(self).render()
-        self.update_history_buttons()
-        self.show_status(_("Undid 1 cycle."))
+        self.refresh_after_history_restore()
+        self.show_status(_("Undid last action."))
 
     def on_redo_cycle(self, event: wx.CommandEvent) -> None:
-        """Replay the most recently undone cycle snapshot."""
+        """Restore the simulator state from before the most recent undo."""
         self.stop_live_trace()
         if not self.redo_history:
-            self.show_status(_("Error: no simulation cycle to redo."))
+            self.show_status(_("Error: no action to redo."))
             return
 
         self.simulation_history.append(self.get_simulation_snapshot())
         simulation_snapshot = self.redo_history.pop()
         self.restore_simulation_snapshot(simulation_snapshot)
+        self.refresh_after_history_restore()
+        self.show_status(_("Redid last action."))
+
+    def on_undo_last_cycle(self, event: wx.CommandEvent) -> None:
+        """Remove the most recent completed simulation cycle."""
+        self.stop_live_trace()
+        if not getattr(self, "cycle_history", []):
+            self.show_status(_("Error: no simulation cycle to undo."))
+            return
+
+        self.cycle_redo_history.append(self.get_simulation_snapshot())
+        simulation_snapshot = self.cycle_history.pop()
+        self.restore_simulation_snapshot(simulation_snapshot)
         self.refresh_switch_rows()
         _get_active_canvas(self).render()
-        self.update_history_buttons()
+        self.show_status(_("Undid 1 cycle."))
+
+    def on_redo_last_cycle(self, event: wx.CommandEvent) -> None:
+        """Restore the most recently removed simulation cycle."""
+        self.stop_live_trace()
+        if not getattr(self, "cycle_redo_history", []):
+            self.show_status(_("Error: no simulation cycle to redo."))
+            return
+
+        self.cycle_history.append(self.get_simulation_snapshot())
+        simulation_snapshot = self.cycle_redo_history.pop()
+        self.restore_simulation_snapshot(simulation_snapshot)
+        self.refresh_switch_rows()
+        _get_active_canvas(self).render()
         self.show_status(_("Redid 1 cycle."))
 
     def on_toggle_3d(self, event: wx.CommandEvent) -> None:
@@ -2781,15 +2848,16 @@ class Gui(wx.Frame):
             self.show_no_loaded_circuit_error()
             return
 
+        action_snapshot = self.get_simulation_snapshot()
         self.devices.cold_startup()
         self.monitors.reset_monitors()
         self.cycles_completed = 0
         self.total_cycles_completed = 0
-        self.simulation_history = []
-        self.redo_history = []
         for canvas_name in ("canvas", "canvas_2d", "canvas_3d"):
             if hasattr(self, canvas_name):
                 getattr(self, canvas_name).cycle_offset = 0
+        self.cycle_history = []
+        self.cycle_redo_history = []
         self.update_cycles_completed_text()
 
         if hasattr(_get_active_canvas(self), "reset_view"):
@@ -2799,6 +2867,8 @@ class Gui(wx.Frame):
 
         self.update_cycle_inspector_range()
         _get_active_canvas(self).render()
+        self.simulation_history.append(action_snapshot)
+        self.redo_history = []
         self.update_history_buttons()
         self.show_status(_("Reset simulation."))
 
@@ -2806,7 +2876,7 @@ class Gui(wx.Frame):
         """Clear waveform history without resetting switch/device state.
 
         Keeps selected monitors, preserves the total cycle count for future CSV
-        and axis labels, resets undo/redo history, and returns the waveform
+        and axis labels, records the action for undo, and returns the waveform
         view to its default pan/zoom.
 
         """
@@ -2815,15 +2885,16 @@ class Gui(wx.Frame):
             self.show_no_loaded_circuit_error()
             return
 
+        action_snapshot = self.get_simulation_snapshot()
         self.monitors.reset_monitors()
         self.cycles_completed = 0
-        self.simulation_history = []
-        self.redo_history = []
         for canvas_name in ("canvas", "canvas_2d", "canvas_3d"):
             if hasattr(self, canvas_name):
                 getattr(self, canvas_name).cycle_offset = (
                     self.total_cycles_completed
                 )
+        self.cycle_history = []
+        self.cycle_redo_history = []
         self.update_cycles_completed_text()
 
         if hasattr(_get_active_canvas(self), "reset_view"):
@@ -2833,6 +2904,8 @@ class Gui(wx.Frame):
 
         self.update_cycle_inspector_range()
         _get_active_canvas(self).render()
+        self.simulation_history.append(action_snapshot)
+        self.redo_history = []
         self.update_history_buttons()
         self.show_status(_("Cleared traces."))
 
@@ -3552,10 +3625,10 @@ class Gui(wx.Frame):
             inspector_icon_path = LIGHT_INSPECTOR_ICON_PATH
 
         self.apply_history_button_theme(
-            self.undo_button, undo_icon_path, _("Undo one cycle")
+            self.undo_button, undo_icon_path, _("Undo last action")
         )
         self.apply_history_button_theme(
-            self.redo_button, redo_icon_path, _("Redo one cycle")
+            self.redo_button, redo_icon_path, _("Redo last action")
         )
         self.apply_history_button_theme(
             self.reset_view_button,
@@ -3923,6 +3996,8 @@ class Gui(wx.Frame):
         self.total_cycles_completed = 0
         self.simulation_history = []
         self.redo_history = []
+        self.cycle_history = []
+        self.cycle_redo_history = []
         self.module_signal_expanded_paths = set()
 
         self.canvas_2d.devices = devices
@@ -4586,8 +4661,15 @@ class Gui(wx.Frame):
         """Remove a monitor selected from the active monitor list."""
         button_id = event.GetId()
         monitor_name = self.monitor_button_keys[button_id]
+        action_snapshot = self.get_simulation_snapshot()
 
         if self.monitors.remove_monitor(monitor_name):
+            self.simulation_history.append(action_snapshot)
+            self.redo_history = []
+            self.cycle_history = []
+            self.cycle_redo_history = []
+            self.update_history_buttons()
+            self.update_cycle_inspector_range()
             self.show_status(
                 tr(
                     "Removed monitor for {monitor_name}.",
@@ -4633,8 +4715,7 @@ class Gui(wx.Frame):
         switch_name -- visible switch name.
         switch_value -- simulator value, 0 for LOW or 1 for HIGH
 
-        Updates the Devices switch state and clears undo/redo history because
-        previous snapshots no longer represent the same input conditions.
+        Updates the Devices switch state and records the action for undo.
 
         """
         switch_id = self.names.query(switch_name)
@@ -4649,11 +4730,14 @@ class Gui(wx.Frame):
             return
 
         # set_switch returns True/False, not one of the Devices error codes
+        action_snapshot = self.get_simulation_snapshot()
         switch_was_set = self.devices.set_switch(switch_id, switch_value)
 
         if switch_was_set:
-            self.simulation_history = []
+            self.simulation_history.append(action_snapshot)
             self.redo_history = []
+            self.cycle_history = []
+            self.cycle_redo_history = []
             self.update_history_buttons()
             if switch_value == 1:
                 switch_label = _("HIGH")
@@ -4706,10 +4790,13 @@ class Gui(wx.Frame):
         button_id = event.GetId()
         signal_name = self.module_signal_button_names[button_id]
         scroll_x, scroll_y = self.module_signal_rows.GetViewStart()
+        action_snapshot = self.get_simulation_snapshot()
 
         if self.monitors.remove_monitor(signal_name):
-            self.simulation_history = []
+            self.simulation_history.append(action_snapshot)
             self.redo_history = []
+            self.cycle_history = []
+            self.cycle_redo_history = []
             self.update_history_buttons()
             self.update_cycle_inspector_range()
             self.show_status(
@@ -4766,6 +4853,7 @@ class Gui(wx.Frame):
 
         device_id, output_id = signal_ids
 
+        action_snapshot = self.get_simulation_snapshot()
         error_type = self.monitors.make_monitor(
             device_id,
             output_id,
@@ -4774,8 +4862,10 @@ class Gui(wx.Frame):
         )
 
         if error_type == self.monitors.NO_ERROR:
-            self.simulation_history = []
+            self.simulation_history.append(action_snapshot)
             self.redo_history = []
+            self.cycle_history = []
+            self.cycle_redo_history = []
             self.update_history_buttons()
             self.update_cycle_inspector_range()
             self.show_status(
