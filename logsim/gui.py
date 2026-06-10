@@ -1664,6 +1664,8 @@ class Gui(wx.Frame):
         self.cycle_inspector_entry.SetInitialSize(
             (CYCLE_INSPECTOR_ENTRY_WIDTH, CYCLE_INSPECTOR_ENTRY_HEIGHT)
         )
+        if hasattr(self.cycle_inspector_entry, "SetLayoutDirection"):
+            self.cycle_inspector_entry.SetLayoutDirection(wx.Layout_LeftToRight)
         self.cycle_inspector_slider = wx.Slider(
             self.cycle_inspector_panel,
             wx.ID_ANY,
@@ -1672,6 +1674,8 @@ class Gui(wx.Frame):
             1,
             style=wx.SL_HORIZONTAL,
         )
+        if hasattr(self.cycle_inspector_slider, "SetLayoutDirection"):
+            self.cycle_inspector_slider.SetLayoutDirection(wx.Layout_LeftToRight)
         self.cycle_inspector_panel.Hide()
         self.undo_button = wxbuttons.GenBitmapButton(
             self,
@@ -3258,9 +3262,12 @@ class Gui(wx.Frame):
     def apply_layout_direction(self, window, layout_direction):
         """Apply wx's native layout direction to an existing window tree."""
         if hasattr(window, "SetLayoutDirection"):
-            if isinstance(window, wxcanvas.GLCanvas) or window is getattr(
-                self, "cycle_inspector_slider", None
-            ):
+            ltr_windows = (
+                getattr(self, "cycle_inspector_panel", None),
+                getattr(self, "cycle_inspector_entry", None),
+                getattr(self, "cycle_inspector_slider", None),
+            )
+            if isinstance(window, wxcanvas.GLCanvas) or window in ltr_windows:
                 window.SetLayoutDirection(wx.Layout_LeftToRight)
             else:
                 window.SetLayoutDirection(layout_direction)
@@ -3324,24 +3331,39 @@ class Gui(wx.Frame):
         self.cycles_input_sizer.Layout()
 
     def set_cycle_inspector_order(self):
-        """Build cycle inspector controls in logical order."""
+        """Build cycle inspector controls without mirroring drag direction."""
         if not hasattr(self, "inspector_sizer"):
             return
 
         self.inspector_sizer.Clear(delete_windows=False)
-        self.inspector_sizer.Add(
-            self.cycle_inspector_label,
-            0,
-            wx.ALIGN_CENTER_VERTICAL | wx.RIGHT,
-            4,
-        )
-        self.inspector_sizer.Add(
-            self.cycle_inspector_entry,
-            0,
-            wx.ALIGN_CENTER_VERTICAL | wx.RIGHT | wx.FIXED_MINSIZE,
-            8,
-        )
-        self.inspector_sizer.Add(self.cycle_inspector_slider, 1, wx.EXPAND)
+        if self.language_code == "ar":
+            self.inspector_sizer.Add(self.cycle_inspector_slider, 1, wx.EXPAND)
+            self.inspector_sizer.Add(
+                self.cycle_inspector_entry,
+                0,
+                wx.ALIGN_CENTER_VERTICAL | wx.LEFT | wx.RIGHT | wx.FIXED_MINSIZE,
+                8,
+            )
+            self.inspector_sizer.Add(
+                self.cycle_inspector_label,
+                0,
+                wx.ALIGN_CENTER_VERTICAL | wx.LEFT,
+                4,
+            )
+        else:
+            self.inspector_sizer.Add(
+                self.cycle_inspector_label,
+                0,
+                wx.ALIGN_CENTER_VERTICAL | wx.RIGHT,
+                4,
+            )
+            self.inspector_sizer.Add(
+                self.cycle_inspector_entry,
+                0,
+                wx.ALIGN_CENTER_VERTICAL | wx.RIGHT | wx.FIXED_MINSIZE,
+                8,
+            )
+            self.inspector_sizer.Add(self.cycle_inspector_slider, 1, wx.EXPAND)
         self.inspector_sizer.Layout()
 
     def on_close_section(self, event):
@@ -4527,12 +4549,11 @@ class Gui(wx.Frame):
             (SIGNAL_ACTION_COLUMN_WIDTH, SIGNAL_ACTION_BUTTON_SIZE)
         )
         action_column_sizer.Add(action_button, 0, wx.ALIGN_CENTER_VERTICAL)
-        if self.language_code == "ar":
+        if self.language_code == "ar" and indent > 0:
             row_sizer.AddStretchSpacer(1)
             row_sizer.Add(label, 0, wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, 4)
             row_sizer.Add(action_column_sizer, 0, wx.ALIGN_CENTER_VERTICAL)
-            if indent > 0:
-                row_sizer.AddSpacer(indent)
+            row_sizer.AddSpacer(indent)
         else:
             if indent > 0:
                 row_sizer.AddSpacer(indent)
