@@ -2755,12 +2755,14 @@ class Gui(wx.Frame):
         is_3d = self.view_3d_menu_item.IsChecked()
 
         if is_3d:
-            self.canvas_2d.Hide()
             self.canvas_3d.Show()
+            self.canvas_3d.SetCurrent(self.canvas_3d.context)
+            self.canvas_2d.Hide()
             self.show_status(_("Switched to 3D view"))
         else:
-            self.canvas_3d.Hide()
             self.canvas_2d.Show()
+            self.canvas_2d.SetCurrent(self.canvas_2d.context)
+            self.canvas_3d.Hide()
             self.show_status(_("Switched to 2D trace view"))
 
         self.Layout()
