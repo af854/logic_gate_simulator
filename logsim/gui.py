@@ -44,22 +44,27 @@ def tr(message: str, **values: Any) -> str:
     return _(message).format(**values)
 
 
-def set_gui_language(language_code: str) -> wx.Locale:
+def set_gui_language(language_code: str) -> wx.Locale | None:
     """Switch wx translations for this process between English and Arabic."""
+    app = wx.GetApp()
     if language_code == "en":
         os.environ["LANG"] = "en"
-        language = wx.LANGUAGE_ENGLISH
-    else:
-        os.environ["LANG"] = "ar"
-        language = wx.LANGUAGE_ARABIC
+        if app is not None:
+            app.language_code = language_code
+            return getattr(app, "locale", None)
+        return None
+
+    os.environ["LANG"] = "ar"
+    if app is not None and getattr(app, "locale", None) is not None:
+        app.language_code = language_code
+        return app.locale
 
     locale = wx.Locale()
-    locale.Init(language)
+    locale.Init(wx.LANGUAGE_ARABIC)
     locale_dir = os.path.join(os.path.dirname(__file__), "locale")
     locale.AddCatalogLookupPathPrefix(locale_dir)
     locale.AddCatalog("logsim")
 
-    app = wx.GetApp()
     if app is not None:
         app.locale = locale
         app.language_code = language_code
@@ -1634,7 +1639,7 @@ class Gui(wx.Frame):
             self,
             wx.ID_ANY,
             "",
-            style=wx.TE_MULTILINE | wx.TE_READONLY | wx.TE_RICH2,
+            style=wx.TE_MULTILINE | wx.TE_READONLY | wx.TE_RICH2 | wx.TE_LEFT,
         )
         self.console_box.SetMinSize((-1, 90))
         self.clear_status_button = wx.Button(self, wx.ID_ANY, _("Clear console"))
@@ -2376,23 +2381,48 @@ class Gui(wx.Frame):
         current_text = self.console_box.GetValue()
         if current_text:
             self.console_box.AppendText("\n")
-        if hasattr(self, "set_console_text_direction"):
-            self.set_console_text_direction(text)
+        if hasattr(self, "apply_console_text_alignment"):
+            self.apply_console_text_alignment()
+        if hasattr(self.console_box, "GetLastPosition"):
+            start_position = self.console_box.GetLastPosition()
+        else:
+            start_position = len(self.console_box.GetValue())
         self.console_box.AppendText(text)
+        if hasattr(self, "apply_console_text_alignment"):
+            self.apply_console_text_alignment(start_position)
 
-    def set_console_text_direction(self, text: str) -> None:
-        """Set console alignment for Arabic and English lines."""
-        if not hasattr(self.console_box, "SetDefaultStyle"):
+    def apply_console_text_alignment(self, start_position: int | None = None) -> None:
+        """Align console text for the active UI language."""
+        if not hasattr(self, "console_box") or not hasattr(
+            self.console_box, "SetDefaultStyle"
+        ):
             return
 
+        is_arabic = self.language_code == "ar"
         text_style = wx.TextAttr(self.theme["status_text"], self.theme["status_bg"])
+        if hasattr(self.console_box, "SetLayoutDirection"):
+            self.console_box.SetLayoutDirection(wx.Layout_LeftToRight)
+        if hasattr(self.console_box, "GetWindowStyleFlag") and hasattr(
+            self.console_box, "SetWindowStyleFlag"
+        ):
+            style_flags = self.console_box.GetWindowStyleFlag()
+            style_flags &= ~(wx.TE_LEFT | wx.TE_RIGHT | wx.TE_CENTRE)
+            style_flags |= wx.TE_RIGHT if is_arabic else wx.TE_LEFT
+            self.console_box.SetWindowStyleFlag(style_flags)
         if hasattr(text_style, "SetAlignment"):
-            has_arabic = any("\u0600" <= character <= "\u06ff" for character in text)
-            if has_arabic:
-                text_style.SetAlignment(wx.TEXT_ALIGNMENT_RIGHT)
-            else:
-                text_style.SetAlignment(wx.TEXT_ALIGNMENT_LEFT)
+            text_style.SetAlignment(
+                wx.TEXT_ALIGNMENT_RIGHT if is_arabic else wx.TEXT_ALIGNMENT_LEFT
+            )
         self.console_box.SetDefaultStyle(text_style)
+
+        if hasattr(self.console_box, "GetLastPosition") and hasattr(
+            self.console_box, "SetStyle"
+        ):
+            if start_position is None:
+                start_position = self.console_box.GetLastPosition()
+            last_position = self.console_box.GetLastPosition()
+            if last_position > start_position:
+                self.console_box.SetStyle(start_position, last_position, text_style)
 
     def update_cycles_completed_text(self) -> None:
         """Update the cycle counter shown in the Simulation panel."""
@@ -3220,19 +3250,27 @@ class Gui(wx.Frame):
     def update_layout_direction(self):
         """Use wx's native layout direction for English or Arabic."""
         if self.language_code == "ar":
-            self.SetLayoutDirection(wx.Layout_RightToLeft)
+            layout_direction = wx.Layout_RightToLeft
         else:
-            self.SetLayoutDirection(wx.Layout_LeftToRight)
+            layout_direction = wx.Layout_LeftToRight
+        self.apply_layout_direction(self, layout_direction)
+
+    def apply_layout_direction(self, window, layout_direction):
+        """Apply wx's native layout direction to an existing window tree."""
+        if hasattr(window, "SetLayoutDirection"):
+            if isinstance(window, wxcanvas.GLCanvas) or window is getattr(
+                self, "cycle_inspector_slider", None
+            ):
+                window.SetLayoutDirection(wx.Layout_LeftToRight)
+            else:
+                window.SetLayoutDirection(layout_direction)
+        if hasattr(window, "GetChildren"):
+            for child in window.GetChildren():
+                self.apply_layout_direction(child, layout_direction)
 
     def align_static_text(self, label):
-        """Align a simple text label for the current language."""
-        style = label.GetWindowStyleFlag()
-        style &= ~(wx.ALIGN_LEFT | wx.ALIGN_RIGHT | wx.ALIGN_CENTRE_HORIZONTAL)
-        if self.language_code == "ar":
-            style |= wx.ALIGN_RIGHT
-        else:
-            style |= wx.ALIGN_LEFT
-        label.SetWindowStyleFlag(style)
+        """Keep static text alignment native to the window direction."""
+        return
 
     def set_simulation_label_order(self):
         """Place Simulation text labels on the correct side."""
@@ -3286,38 +3324,24 @@ class Gui(wx.Frame):
         self.cycles_input_sizer.Layout()
 
     def set_cycle_inspector_order(self):
-        """Place the cycle inspector controls for the current language."""
+        """Build cycle inspector controls in logical order."""
         if not hasattr(self, "inspector_sizer"):
             return
 
         self.inspector_sizer.Clear(delete_windows=False)
-        if self.language_code == "ar":
-            self.inspector_sizer.Add(
-                self.cycle_inspector_slider, 1, wx.EXPAND | wx.LEFT, 8
-            )
-            self.inspector_sizer.Add(
-                self.cycle_inspector_entry,
-                0,
-                wx.ALIGN_CENTER_VERTICAL | wx.LEFT | wx.FIXED_MINSIZE,
-                4,
-            )
-            self.inspector_sizer.Add(
-                self.cycle_inspector_label, 0, wx.ALIGN_CENTER_VERTICAL
-            )
-        else:
-            self.inspector_sizer.Add(
-                self.cycle_inspector_label,
-                0,
-                wx.ALIGN_CENTER_VERTICAL | wx.RIGHT,
-                4,
-            )
-            self.inspector_sizer.Add(
-                self.cycle_inspector_entry,
-                0,
-                wx.ALIGN_CENTER_VERTICAL | wx.RIGHT | wx.FIXED_MINSIZE,
-                8,
-            )
-            self.inspector_sizer.Add(self.cycle_inspector_slider, 1, wx.EXPAND)
+        self.inspector_sizer.Add(
+            self.cycle_inspector_label,
+            0,
+            wx.ALIGN_CENTER_VERTICAL | wx.RIGHT,
+            4,
+        )
+        self.inspector_sizer.Add(
+            self.cycle_inspector_entry,
+            0,
+            wx.ALIGN_CENTER_VERTICAL | wx.RIGHT | wx.FIXED_MINSIZE,
+            8,
+        )
+        self.inspector_sizer.Add(self.cycle_inspector_slider, 1, wx.EXPAND)
         self.inspector_sizer.Layout()
 
     def on_close_section(self, event):
@@ -4386,27 +4410,19 @@ class Gui(wx.Frame):
             if module_name == "signals_at_this_level":
                 continue
             pane_label = tr("{module_name} internals", module_name=module_name)
-            pane_parent = parent
-            if self.language_code == "ar":
-                pane_parent = wx.Panel(parent, wx.ID_ANY)
-                pane_parent.SetBackgroundColour(self.theme["panel_bg"])
-                pane_parent.SetLayoutDirection(wx.Layout_LeftToRight)
-
             collapsible_pane = wx.CollapsiblePane(
-                pane_parent,
+                parent,
                 wx.ID_ANY,
                 pane_label,
                 style=COLLAPSIBLE_PANE_STYLE,
             )
-            if self.language_code == "ar":
+            if self.language_code == "ar" and parent_path:
                 collapsible_pane.SetLayoutDirection(wx.Layout_RightToLeft)
             pane_font = collapsible_pane.GetFont()
             pane_font.SetWeight(wx.FONTWEIGHT_BOLD)
             collapsible_pane.SetFont(pane_font)
             self.set_collapsible_pane_colours(collapsible_pane)
             pane = collapsible_pane.GetPane()
-            if self.language_code == "ar":
-                pane.SetLayoutDirection(wx.Layout_LeftToRight)
             pane.SetBackgroundColour(self.theme["panel_bg"])
             pane_sizer = wx.BoxSizer(wx.HORIZONTAL)
             guide_panel = wx.Panel(pane, wx.ID_ANY)
@@ -4443,28 +4459,20 @@ class Gui(wx.Frame):
                 self.on_module_signal_pane_changed,
             )
             pane_row_sizer = wx.BoxSizer(wx.HORIZONTAL)
-            if self.language_code == "ar":
+            if self.language_code == "ar" and parent_path:
                 pane_row_sizer.AddStretchSpacer(1)
                 pane_row_sizer.Add(collapsible_pane, 0, wx.EXPAND)
-                if parent_path:
-                    pane_row_sizer.AddSpacer(MODULE_NESTED_INDENT_WIDTH)
-                pane_parent.SetSizer(pane_row_sizer)
-                parent_sizer.Add(
-                    pane_parent,
-                    0,
-                    wx.EXPAND | wx.TOP | wx.BOTTOM | wx.LEFT | wx.RIGHT,
-                    MODULE_PANE_GAP,
-                )
+                pane_row_sizer.AddSpacer(MODULE_NESTED_INDENT_WIDTH)
             else:
                 if parent_path:
                     pane_row_sizer.AddSpacer(MODULE_NESTED_INDENT_WIDTH)
                 pane_row_sizer.Add(collapsible_pane, 1, wx.EXPAND)
-                parent_sizer.Add(
-                    pane_row_sizer,
-                    0,
-                    wx.EXPAND | wx.TOP | wx.BOTTOM | wx.LEFT | wx.RIGHT,
-                    MODULE_PANE_GAP,
-                )
+            parent_sizer.Add(
+                pane_row_sizer,
+                0,
+                wx.EXPAND | wx.TOP | wx.BOTTOM | wx.LEFT | wx.RIGHT,
+                MODULE_PANE_GAP,
+            )
 
     def store_module_signal_pane_state(self):
         """Remember expanded module panes before the signal list is rebuilt."""
@@ -4521,10 +4529,10 @@ class Gui(wx.Frame):
         action_column_sizer.Add(action_button, 0, wx.ALIGN_CENTER_VERTICAL)
         if self.language_code == "ar":
             row_sizer.AddStretchSpacer(1)
-            if indent > 0:
-                row_sizer.AddSpacer(indent)
             row_sizer.Add(label, 0, wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, 4)
             row_sizer.Add(action_column_sizer, 0, wx.ALIGN_CENTER_VERTICAL)
+            if indent > 0:
+                row_sizer.AddSpacer(indent)
         else:
             if indent > 0:
                 row_sizer.AddSpacer(indent)
