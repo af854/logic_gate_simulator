@@ -142,11 +142,11 @@ class TutorialOverlay(wx.Frame):
     def update_step(self, step, completed=False):
         instructions = [
             "Click and drag to orbit the view.",
-            "Hold SHIFT and drag to pan the view.",
-            "Scroll the mouse wheel to zoom in and out.",
+            "Hold SHIFT and drag to pan view.",
+            "Scroll the mouse wheel to zoom.",
             "Press 'F' for front view.",
             "Press 'R' to reset view.",
-            "Press 'B' to cycle between a set of 3 backgrounds.",
+            "Press 'B' to toggle backgrounds.",
             "Tutorial complete!",
         ]
         self.gauge.SetValue(step)
@@ -312,8 +312,10 @@ class Canvas3D(wxcanvas.GLCanvas):
 
     def prompt_tutorial(self):
         """Show dialog and conditionally launch the tutorial."""
-        if self.tutorial_active:
+        if self.tutorial_active or getattr(self, "_tutorial_prompt_seen", False):
             return
+
+        self._tutorial_prompt_seen = True
         dlg = TutorialPromptDialog(self.GetTopLevelParent(), self.theme)
         dlg.ShowModal()
         result = dlg.result
@@ -649,6 +651,9 @@ class Canvas3D(wxcanvas.GLCanvas):
     #
     def render(self):
         """Render the complete 3D scene mapping tree hierarchy to Z/Y depth offsets."""
+        if not self.IsShownOnScreen():
+            return
+
         self.SetCurrent(self.context)
         if not self.init:
             self.initialise_gl()
