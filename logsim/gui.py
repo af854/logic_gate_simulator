@@ -438,6 +438,8 @@ class MyGLCanvas(wxcanvas.GLCanvas):
 
         """
         size = self.get_render_size()
+        if size.width == 0 or size.height == 0:
+            return
         self.SetCurrent(self.context)
 
         # Use window pixels as OpenGL coordinates as this makes drawing easier
@@ -479,6 +481,9 @@ class MyGLCanvas(wxcanvas.GLCanvas):
         headings, and optional cycle inspector values
 
         """
+        size = self.get_render_size()
+        if size.width == 0 or size.height == 0:
+            return
         self.SetCurrent(self.context)
         if not self.init:
             # Configure the viewport, modelview and projection matrices
