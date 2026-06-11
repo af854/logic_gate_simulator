@@ -330,7 +330,7 @@ class Devices:
         self.cold_startup()  # D-type initialised to a random state
 
     def cold_startup(self):
-        """Simulate cold start-up of D-types and clocks.
+        """Simulate cold start-up of D-types, clocks, SIGGEN, and RC.
 
         Set the memory of the D-types to a random state and make the clocks
         begin from a random point in their cycles.
