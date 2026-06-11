@@ -1939,7 +1939,7 @@ class Gui(wx.Frame):
         self.set_cycle_inspector_order()
         self.cycle_inspector_panel.SetSizer(self.inspector_sizer)
 
-        # Add the active canvas to the layout. 
+        # Add the active canvas to the layout.
         self.canvas_sizer = canvas_sizer
         canvas_sizer.Add(self.canvas_2d, 1, wx.EXPAND)
         canvas_sizer.Add(
@@ -2854,7 +2854,7 @@ class Gui(wx.Frame):
             self.canvas_2d.cycle_inspector_index = old_cycle_inspector_index
             self.canvas_3d = None
             new_canvas = self.canvas_2d
-            message = _("Switched to 2D trace view")
+            message = _("Switched to 2D view")
 
         self.canvas_sizer.Insert(0, new_canvas, 1, wx.EXPAND)
         self.Layout()
@@ -3122,11 +3122,16 @@ class Gui(wx.Frame):
         self.update_live_trace_speed_button()
         self.update_live_trace_status_text()
         self.update_switch_rows()
-        self.update_module_signal_rows()
         self.update_monitor_rows()
         self.Layout()
         self.Refresh()
         self.Update()
+
+        # Rebuild collapsible monitor panes after the
+        # language/menu event has finished.
+        wx.CallAfter(self.update_module_signal_rows)
+        wx.CallAfter(self.Layout)
+        wx.CallAfter(self.Refresh)
 
     def rebuild_menu_bar(self):
         """Recreate the menu bar using the current language.
