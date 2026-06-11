@@ -21,7 +21,8 @@ device_kind          = parameterised_device, "(", number, ")"
                      | fixed_device 
                      | module_device ;
 
-parameterised_device = "AND" | "NAND" | "OR" | "NOR" | "CLOCK" | "SWITCH" ;
+parameterised_device = "AND" | "NAND" | "OR" | "NOR" | "CLOCK" | "SWITCH" 
+                     | "RC" | "SIGGEN" ;
 fixed_device         = "DTYPE" | "XOR" ;
 module_device        = name ;
 
