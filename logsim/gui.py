@@ -2798,7 +2798,9 @@ class Gui(wx.Frame):
 
     def on_toggle_3d(self, event: wx.CommandEvent) -> None:
         """Switch between 2D and 3D canvas modes by recreating the GLCanvas."""
-        is_3d = self.view_3d_menu_item.IsChecked()
+        currently_3d = self.canvas_3d is not None
+        is_3d = not currently_3d
+        self.view_3d_menu_item.Check(is_3d)
 
         if self.canvas_3d is not None:
             old_canvas = self.canvas_3d
