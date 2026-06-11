@@ -258,62 +258,62 @@ msgstr ""
 "- توصيلات بين مخارج الأجهزة ومداخلها\n"
 "- إشارات مراقبة لتسجيلها وعرضها\n"
 "\n"
-"تظهر الإشارات داخل الوحدات تحت أسماء وحدات قابلة للطي في الواجهة.\n"
-"استخدم ملف > فتح لتحميل تعريف دائرة آخر دون إعادة تشغيل البرنامج."
+"تظهر الإشارات داخل الوحدات تحت أسماء وحدات قابلة للطي في الواجهة\n"
+"استخدم ملف > فتح لتحميل تعريف دائرة آخر دون إعادة تشغيل البرنامج"
 
 msgid "Opened external documentation"
 msgstr "تم فتح التوثيق الخارجي"
 
 msgid "Error: could not open external documentation."
-msgstr "خطأ: تعذر فتح التوثيق الخارجي."
+msgstr "خطأ: تعذر فتح التوثيق الخارجي"
 
 msgid "Error: number of cycles must be positive."
-msgstr "خطأ: يجب أن يكون عدد الدورات موجبًا."
+msgstr "خطأ: يجب أن يكون عدد الدورات موجبًا"
 
 msgid "Error: cannot run more than {max_cycles} cycles at once."
-msgstr "خطأ: لا يمكن تشغيل أكثر من {max_cycles} دورة مرة واحدة."
+msgstr "خطأ: لا يمكن تشغيل أكثر من {max_cycles} دورة مرة واحدة"
 
 msgid "Error: network failed to reach a steady state."
-msgstr "خطأ: فشلت الشبكة في الوصول إلى حالة مستقرة."
+msgstr "خطأ: فشلت الشبكة في الوصول إلى حالة مستقرة"
 
 msgid "You can run at most {max_cycles} cycles at a time."
-msgstr "يمكنك تشغيل {max_cycles} دورة كحد أقصى في كل مرة."
+msgstr "يمكنك تشغيل {max_cycles} دورة كحد أقصى في كل مرة"
 
 msgid "Maximum Cycles"
 msgstr "الحد الأقصى للدورات"
 
 msgid "Error: no circuit loaded. Use File > Open to load one."
-msgstr "خطأ: لا توجد دائرة محملة. استخدم ملف > فتح لتحميل دائرة."
+msgstr "خطأ: لا توجد دائرة محملة. استخدم ملف > فتح لتحميل دائرة"
 
 msgid "No circuit loaded. Use File > Open to load one."
-msgstr "لا توجد دائرة محملة. استخدم ملف > فتح لتحميل دائرة."
+msgstr "لا توجد دائرة محملة. استخدم ملف > فتح لتحميل دائرة"
 
 msgid "Error: network is incomplete."
-msgstr "خطأ: الشبكة غير مكتملة."
+msgstr "خطأ: الشبكة غير مكتملة"
 
 msgid "Ran simulation for {cycles} cycles."
-msgstr "تم تشغيل المحاكاة لمدة {cycles} دورة."
+msgstr "تم تشغيل المحاكاة لمدة {cycles} دورة"
 
 msgid "Ran {cycles} cycles"
 msgstr "تم تشغيل {cycles} دورة"
 
 msgid "Ran simulation for 1 cycle."
-msgstr "تم تشغيل المحاكاة لدورة واحدة."
+msgstr "تم تشغيل المحاكاة لدورة واحدة"
 
 msgid "Ran 1 cycle"
 msgstr "تم تشغيل دورة واحدة"
 
 msgid "Started live tracing for {cycles} cycles."
-msgstr "بدأ التتبع المباشر لمدة {cycles} دورة."
+msgstr "بدأ التتبع المباشر لمدة {cycles} دورة"
 
 msgid "Live tracing: {done}/{target} cycles"
 msgstr "التتبع المباشر: {done}/{target} دورة"
 
 msgid "Resumed live tracing with {remaining} cycles remaining."
-msgstr "تم استئناف التتبع المباشر مع بقاء {remaining} دورة."
+msgstr "تم استئناف التتبع المباشر مع بقاء {remaining} دورة"
 
 msgid "Paused live tracing."
-msgstr "تم إيقاف التتبع المباشر مؤقتًا."
+msgstr "تم إيقاف التتبع المباشر مؤقتًا"
 
 msgid "Live tracing paused"
 msgstr "التتبع المباشر متوقف مؤقتًا"
@@ -330,32 +330,32 @@ msgstr "سرعة التتبع المباشر: {speed}"
 msgid "Live tracing stopped"
 msgstr "تم إيقاف التتبع المباشر"
 
-msgid "Completed live tracing for {cycles} cycles."
-msgstr "اكتمل التتبع المباشر لمدة {cycles} دورة."
+msgid "Completed live tracing for {cycles} cycles"
+msgstr "اكتمل التتبع المباشر لمدة {cycles} دورة"
 
 msgid "Error: no action to undo."
-msgstr "خطأ: لا يوجد إجراء للتراجع عنه."
+msgstr "خطأ: لا يوجد إجراء للتراجع عنه"
 
 msgid "Undid last action."
-msgstr "تم التراجع عن آخر إجراء."
+msgstr "تم التراجع عن آخر إجراء"
 
 msgid "Error: no action to redo."
-msgstr "خطأ: لا يوجد إجراء لإعادته."
+msgstr "خطأ: لا يوجد إجراء لإعادته"
 
 msgid "Redid last action."
-msgstr "تمت إعادة آخر إجراء."
+msgstr "تمت إعادة آخر إجراء"
 
 msgid "Error: no simulation cycle to undo."
-msgstr "خطأ: لا توجد دورة محاكاة للتراجع عنها."
+msgstr "خطأ: لا توجد دورة محاكاة للتراجع عنها"
 
 msgid "Undid 1 cycle."
-msgstr "تم التراجع عن دورة واحدة."
+msgstr "تم التراجع عن دورة واحدة"
 
 msgid "Error: no simulation cycle to redo."
-msgstr "خطأ: لا توجد دورة محاكاة لإعادتها."
+msgstr "خطأ: لا توجد دورة محاكاة لإعادتها"
 
 msgid "Redid 1 cycle."
-msgstr "تمت إعادة دورة واحدة."
+msgstr "تمت إعادة دورة واحدة"
 
 msgid "Switched to 3D view"
 msgstr "تم التبديل إلى العرض ثلاثي الأبعاد"
@@ -370,10 +370,10 @@ msgid "3D antialiasing disabled"
 msgstr "تم تعطيل تنعيم العرض ثلاثي الأبعاد"
 
 msgid "Reset simulation."
-msgstr "تمت إعادة ضبط المحاكاة."
+msgstr "تمت إعادة ضبط المحاكاة"
 
 msgid "Cleared traces."
-msgstr "تم مسح المخططات."
+msgstr "تم مسح المخططات"
 
 msgid "Zoomed in"
 msgstr "تم التكبير"
@@ -389,7 +389,7 @@ msgid "Hidden cycle inspector"
 msgstr "تم إخفاء فاحص الدورات"
 
 msgid "Switched to {theme_name} mode."
-msgstr "{theme_name} تم التبديل إلى وضع."
+msgstr "{theme_name} تم التبديل إلى وضع"
 
 msgid "Open circuit definition"
 msgstr "فتح تعريف دائرة"
@@ -398,10 +398,10 @@ msgid "Circuit files (*.txt)|*.txt|All files (*.*)|*.*"
 msgstr "ملفات الدوائر (*.txt)|*.txt|كل الملفات (*.*)|*.*"
 
 msgid "Error: no monitors to export."
-msgstr "خطأ: لا توجد مراقبات للتصدير."
+msgstr "خطأ: لا توجد مراقبات للتصدير"
 
 msgid "Error: Image export is only supported in 2D view."
-msgstr "خطأ: تصدير الصورة مدعوم فقط في العرض ثنائي الأبعاد."
+msgstr "خطأ: تصدير الصورة مدعوم فقط في العرض ثنائي الأبعاد"
 
 msgid "Export waveform image"
 msgstr "تصدير صورة الموجة"
@@ -410,13 +410,13 @@ msgid "PNG image (*.png)|*.png"
 msgstr "صورة PNG (*.png)|*.png"
 
 msgid "Exported waveform image to {file_path}."
-msgstr "{file_path} تم تصدير صورة الموجة إلى."
+msgstr "{file_path} تم تصدير صورة الموجة إلى"
 
 msgid "Error: could not export waveform image."
-msgstr "خطأ: تعذر تصدير صورة الموجة."
+msgstr "خطأ: تعذر تصدير صورة الموجة"
 
 msgid "Error: no monitor traces to export."
-msgstr "خطأ: لا توجد مخططات مراقبة للتصدير."
+msgstr "خطأ: لا توجد مخططات مراقبة للتصدير"
 
 msgid "Export monitor traces"
 msgstr "تصدير مخططات المراقبة"
@@ -425,10 +425,10 @@ msgid "CSV file (*.csv)|*.csv"
 msgstr "ملف CSV (*.csv)|*.csv"
 
 msgid "Exported monitor traces to {file_path}."
-msgstr "{file_path} تم تصدير مخططات المراقبة إلى."
+msgstr "{file_path} تم تصدير مخططات المراقبة إلى"
 
 msgid "Error: could not export CSV: {error}."
-msgstr "خطأ: تعذر تصدير CSV: {error}."
+msgstr "خطأ: تعذر تصدير CSV: {error}"
 
 msgid "Undo last action"
 msgstr "تراجع عن آخر إجراء"
@@ -470,7 +470,7 @@ msgid "Logic Simulator - {path}"
 msgstr "محاكي المنطق - {path}"
 
 msgid "Loaded {path}."
-msgstr "{path} تم تحميل."
+msgstr "{path} تم تحميل"
 
 msgid "No switches"
 msgstr "لا توجد مفاتيح"
@@ -485,40 +485,40 @@ msgid "No monitorable signals"
 msgstr "لا توجد إشارات قابلة للمراقبة"
 
 msgid "No monitor signals to display."
-msgstr "لا توجد إشارات مراقبة لعرضها."
+msgstr "لا توجد إشارات مراقبة لعرضها"
 
 msgid "Remove"
 msgstr "إزالة"
 
 msgid "Added monitor for {monitor_name}."
-msgstr "{monitor_name}تمت إضافة مراقب لـ."
+msgstr "{monitor_name}تمت إضافة مراقب لـ"
 
 msgid "Removed monitor for {monitor_name}."
-msgstr "{monitor_name}تمت إزالة المراقب لـ."
+msgstr "{monitor_name}تمت إزالة المراقب لـ"
 
 msgid "Error: could not remove monitor for {monitor_name}."
-msgstr "{monitor_name}خطأ: تعذرت إزالة المراقب لـ."
+msgstr "{monitor_name}خطأ: تعذرت إزالة المراقب لـ"
 
 msgid "Error: unknown switch '{switch_name}'."
-msgstr "'{switch_name}' خطأ: مفتاح غير معروف."
+msgstr "'{switch_name}' خطأ: مفتاح غير معروف"
 
 msgid "Set switch {switch_name} to {switch_label}."
-msgstr "{switch_label} تم ضبط المفتاح {switch_name} على."
+msgstr "{switch_label} تم ضبط المفتاح {switch_name} على"
 
 msgid "Error: could not set {switch_name}."
-msgstr "{switch_name} خطأ: تعذر ضبط."
+msgstr "{switch_name} خطأ: تعذر ضبط"
 
 msgid "Error: {signal_name} is not monitored."
-msgstr "{signal_name} خطأ: لا تتم مراقبة."
+msgstr "{signal_name} خطأ: لا تتم مراقبة"
 
 msgid "Error: enter a monitor name."
-msgstr "خطأ: أدخل اسم مراقب."
+msgstr "خطأ: أدخل اسم مراقب"
 
 msgid "Error: unknown signal '{monitor_name}'."
-msgstr "'{monitor_name}' خطأ: إشارة غير معروفة."
+msgstr "'{monitor_name}' خطأ: إشارة غير معروفة"
 
 msgid "Error: could not add monitor for {monitor_name}. {reason}."
-msgstr "{reason} .{monitor_name}خطأ: تعذرت إضافة مراقب لـ."
+msgstr "{reason} .{monitor_name}خطأ: تعذرت إضافة مراقب لـ"
 
 msgid "signal is not an output"
 msgstr "الإشارة ليست خرجًا"

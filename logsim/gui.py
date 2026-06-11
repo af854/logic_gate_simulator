@@ -3078,6 +3078,12 @@ class Gui(wx.Frame):
 
     def refresh_translated_labels(self):
         """Refresh labels that can change when the GUI language changes."""
+        inspector_was_hidden = not self.cycle_inspector_panel.IsShown()
+        if inspector_was_hidden:
+            self.cycle_inspector_panel.Show()
+            self.Layout()
+            self.Update()
+
         self.SetTitle(
             tr("Logic Simulator - {path}", path=self.path)
             if self.path
@@ -3122,16 +3128,20 @@ class Gui(wx.Frame):
         self.update_live_trace_speed_button()
         self.update_live_trace_status_text()
         self.update_switch_rows()
+        self.update_module_signal_rows()
         self.update_monitor_rows()
+
+        if inspector_was_hidden:
+            self.cycle_inspector_panel.Hide()
+            self.cycle_inspector_menu_item.Check(False)
+            for canvas_name in ("canvas", "canvas_2d", "canvas_3d"):
+                canvas = getattr(self, canvas_name, None)
+                if canvas is not None:
+                    canvas.cycle_inspector_enabled = False
+
         self.Layout()
         self.Refresh()
         self.Update()
-
-        # Rebuild collapsible monitor panes after the
-        # language/menu event has finished.
-        wx.CallAfter(self.update_module_signal_rows)
-        wx.CallAfter(self.Layout)
-        wx.CallAfter(self.Refresh)
 
     def rebuild_menu_bar(self):
         """Recreate the menu bar using the current language.
