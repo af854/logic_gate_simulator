@@ -38,6 +38,7 @@ class DummySymbol:
         else:
             self.raw_text = ""
 
+
 class DummySignal:
     """Mock Signal representation for testing"""
 
@@ -790,6 +791,7 @@ def test_parse_device_kind_module_parens_error(parser_env):
     p._parse_device_kind()
     p._error.assert_called()
 
+
 def test_parse_device_kind_name_treated_as_module(parser_env):
     p = parser_env
     p._error = MagicMock()
@@ -805,6 +807,7 @@ def test_parse_device_kind_name_treated_as_module(parser_env):
     # _parse_device for top level or _check_module_dependencies.
     assert res == ("module", 1, None)
     p._error.assert_not_called()
+
 
 def test_parse_device_statement_valid(parser_env):
     p = parser_env
@@ -1965,6 +1968,7 @@ def test_parse_device_module(parser_env):
     )
     p._parse_device()
     p._instantiate_module.assert_called()
+
 
 def test_parse_device_module_undefined(parser_env):
     p = parser_env
