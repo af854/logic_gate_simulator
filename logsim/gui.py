@@ -2382,6 +2382,15 @@ class Gui(wx.Frame):
         if not text:
             return
 
+        if getattr(self, "language_code", "en") == "ar":
+            # mixed Arabic and latin text is glitchy on linux
+            # and wx, so we keep the console itself left-to-right
+            # and use LRM (the u200e) to consistently align whole string
+            # regardless of whether it starts with Latin or Arabic
+            # (preventing wx from trying to infer the direction
+            # itself)
+            text = "\u200e" + text
+
         current_text = self.console_box.GetValue()
         if current_text:
             self.console_box.AppendText("\n")
@@ -3268,6 +3277,7 @@ class Gui(wx.Frame):
                 getattr(self, "cycle_inspector_panel", None),
                 getattr(self, "cycle_inspector_entry", None),
                 getattr(self, "cycle_inspector_slider", None),
+                getattr(self, "console_box", None),
             )
             if isinstance(window, wxcanvas.GLCanvas) or window in ltr_windows:
                 window.SetLayoutDirection(wx.Layout_LeftToRight)
