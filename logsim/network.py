@@ -7,18 +7,18 @@ Classes
 Network - builds and executes the network.
 """
 # INTERIM CHANGES:
-#   separate DEVICE_ABSENT into FIRST_DEVICE_ABSENT 
+#   separate DEVICE_ABSENT into FIRST_DEVICE_ABSENT
 #   and SECOND_DEVICE_ABSENT, and same for PORT_ABSENT
-#   to easily allow error messages to point accurately to 
-#   the correct device in a connection statement. 
+#   to easily allow error messages to point accurately to
+#   the correct device in a connection statement.
 # FINAL CHANGES:
 #   Add handling for SIGGEN and RC devices
 #   (Add methods to update and execute the new devices,
-#   and group execution of CLOCK with the SIGGEN and RC 
-#   into new method called execute_signal_source). 
+#   and group execution of CLOCK with the SIGGEN and RC
+#   into new method called execute_signal_source).
+
 
 class Network:
-
     """Build and execute the network.
 
     This class contains many functions required for connecting devices together
@@ -84,10 +84,16 @@ class Network:
         self.names = names
         self.devices = devices
 
-        [self.NO_ERROR, self.INPUT_TO_INPUT, self.OUTPUT_TO_OUTPUT,
-         self.INPUT_CONNECTED, self.FIRST_PORT_ABSENT,
-         self.SECOND_PORT_ABSENT, self.FIRST_DEVICE_ABSENT,
-         self.SECOND_DEVICE_ABSENT] = self.names.unique_error_codes(8)
+        [
+            self.NO_ERROR,
+            self.INPUT_TO_INPUT,
+            self.OUTPUT_TO_OUTPUT,
+            self.INPUT_CONNECTED,
+            self.FIRST_PORT_ABSENT,
+            self.SECOND_PORT_ABSENT,
+            self.FIRST_DEVICE_ABSENT,
+            self.SECOND_DEVICE_ABSENT,
+        ] = self.names.unique_error_codes(8)
         self.steady_state = True  # for checking if signals have settled
 
     def get_connected_output(self, device_id, input_id):
@@ -127,8 +133,9 @@ class Network:
                 return device.outputs[output_id]
         return None
 
-    def make_connection(self, first_device_id, first_port_id, second_device_id,
-                        second_port_id):
+    def make_connection(
+        self, first_device_id, first_port_id, second_device_id, second_port_id
+    ):
         """Connect the first device to the second device.
 
         Return self.NO_ERROR if successful, or the corresponding error if not.
@@ -151,8 +158,7 @@ class Network:
                 error_type = self.INPUT_TO_INPUT
             elif second_port_id in second_device.outputs:
                 # Make connection
-                first_device.inputs[first_port_id] = (second_device_id,
-                                                      second_port_id)
+                first_device.inputs[first_port_id] = (second_device_id, second_port_id)
                 error_type = self.NO_ERROR
             else:  # second_port_id is not a valid input or output port
                 error_type = self.SECOND_PORT_ABSENT
@@ -166,8 +172,10 @@ class Network:
                     # Input is already in a connection
                     error_type = self.INPUT_CONNECTED
                 else:
-                    second_device.inputs[second_port_id] = (first_device_id,
-                                                            first_port_id)
+                    second_device.inputs[second_port_id] = (
+                        first_device_id,
+                        first_port_id,
+                    )
                     error_type = self.NO_ERROR
             else:
                 error_type = self.SECOND_PORT_ABSENT
@@ -317,8 +325,9 @@ class Network:
 
         # Update the output towards its memory
         new_Q = self.update_signal(Q_signal, device.dtype_memory)
-        new_QBAR = self.update_signal(QBAR_signal,
-                                      self.invert_signal(device.dtype_memory))
+        new_QBAR = self.update_signal(
+            QBAR_signal, self.invert_signal(device.dtype_memory)
+        )
         if new_Q is None or new_QBAR is None:  # if the update is unsuccessful
             return False
         device.outputs[self.devices.Q_ID] = new_Q
@@ -328,12 +337,12 @@ class Network:
 
     def execute_signal_source(self, device_id):
         """Simulate a signal source and update its output signal value
-        based on whether it was set to RISING or FALLING in 
-        corresponding update_xxxs(). 
+        based on whether it was set to RISING or FALLING in
+        corresponding update_xxxs().
 
         Return True if successful.
         """
-        # Formerly execute_clock() 
+        # Formerly execute_clock()
         # But the same logic is used for any signal source that has its
         # output set to RISING or FALLING in functions like update_clocks()
         device = self.devices.get_device(device_id)
@@ -358,7 +367,7 @@ class Network:
 
         else:
             return False
-        
+
     def execute_clock(self, device_id):
         """Simulate a clock and update its output signal value."""
         # A wrapper so existing calls to execute_clock still function.
@@ -371,14 +380,13 @@ class Network:
             device = self.devices.get_device(device_id)
             if device.clock_counter == device.clock_half_period:
                 device.clock_counter = 0
-                output_signal = self.get_output_signal(device_id,
-                                                       output_id=None)
+                output_signal = self.get_output_signal(device_id, output_id=None)
                 if output_signal == self.devices.HIGH:
                     device.outputs[None] = self.devices.FALLING
                 elif output_signal == self.devices.LOW:
                     device.outputs[None] = self.devices.RISING
             device.clock_counter += 1
-    
+
     def update_rcs(self):
         """Update RC devices at the start of a simulation cycle to RISING or FALLING.
 
@@ -399,7 +407,7 @@ class Network:
 
     def update_siggens(self):
         """Update SIGGEN devices at the start of a simulation cycle to RISING or FALLING,
-        based on its stored pattern. 
+        based on its stored pattern.
         """
         siggen_devices = self.devices.find_devices(self.devices.SIGGEN)
 
@@ -419,7 +427,9 @@ class Network:
 
             if output_signal == self.devices.HIGH and target_signal == self.devices.LOW:
                 device.outputs[None] = self.devices.FALLING
-            elif output_signal == self.devices.LOW and target_signal == self.devices.HIGH:
+            elif (
+                output_signal == self.devices.LOW and target_signal == self.devices.HIGH
+            ):
                 device.outputs[None] = self.devices.RISING
 
             device.siggen_counter += 1
@@ -465,34 +475,36 @@ class Network:
             for device_id in d_type_devices:  # execute DTYPE devices
                 if not self.execute_d_type(device_id):
                     return False
-                
+
             # Execute signal source devices before gates so gates see clean
             # HIGH/LOW signal, not rising/falling
             for device_id in clock_devices:  # complete clock executions
                 if not self.execute_signal_source(device_id):
-                    return False           
+                    return False
             for device_id in rc_devices:  # complete RC executions
                 if not self.execute_signal_source(device_id):
                     return False
             for device_id in siggen_devices:  # complete SIGGEN executions
                 if not self.execute_signal_source(device_id):
                     return False
-                
+
             for device_id in and_devices:  # execute AND gate devices
-                if not self.execute_gate(device_id, self.devices.HIGH,
-                                         self.devices.HIGH):
+                if not self.execute_gate(
+                    device_id, self.devices.HIGH, self.devices.HIGH
+                ):
                     return False
             for device_id in or_devices:  # execute OR gate devices
-                if not self.execute_gate(device_id, self.devices.LOW,
-                                         self.devices.LOW):
+                if not self.execute_gate(device_id, self.devices.LOW, self.devices.LOW):
                     return False
             for device_id in nand_devices:  # execute NAND gate devices
-                if not self.execute_gate(device_id, self.devices.HIGH,
-                                         self.devices.LOW):
+                if not self.execute_gate(
+                    device_id, self.devices.HIGH, self.devices.LOW
+                ):
                     return False
             for device_id in nor_devices:  # execute NOR gate devices
-                if not self.execute_gate(device_id, self.devices.LOW,
-                                         self.devices.HIGH):
+                if not self.execute_gate(
+                    device_id, self.devices.LOW, self.devices.HIGH
+                ):
                     return False
             for device_id in xor_devices:  # execute XOR devices
                 if not self.execute_gate(device_id, None, None):

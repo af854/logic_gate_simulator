@@ -13,6 +13,7 @@ import random
 
 # Edited to add new devices: RC and SIGGEN
 
+
 class Device:
     """Store device properties.
 
@@ -145,9 +146,13 @@ class Devices:
         self.gate_types = [self.AND, self.OR, self.NAND, self.NOR, self.XOR] = (
             self.names.lookup(gate_strings)
         )
-        self.device_types = [self.CLOCK, self.SWITCH, self.D_TYPE, self.RC, self.SIGGEN] = self.names.lookup(
-            device_strings
-        )
+        self.device_types = [
+            self.CLOCK,
+            self.SWITCH,
+            self.D_TYPE,
+            self.RC,
+            self.SIGGEN,
+        ] = self.names.lookup(device_strings)
         self.dtype_input_ids = [
             self.CLK_ID,
             self.SET_ID,
@@ -300,11 +305,10 @@ class Devices:
         # So we just put LOW as the initial value.
         # When update function in network.py is called it will
         # start following the sequence from the first cycle that is shown
-        # on GUI. 
+        # on GUI.
         self.add_output(device_id, output_id=None, signal=self.LOW)
 
         device.siggen_counter = 0
-    
 
     def make_gate(self, device_id, device_kind, no_of_inputs):
         """Make logic gates with the specified number of inputs."""
@@ -344,7 +348,7 @@ class Devices:
                 self.add_output(device.device_id, output_id=None, signal=clock_signal)
                 # Initialise it to a random point in its cycle.
                 device.clock_counter = random.randrange(device.clock_half_period)
-            
+
             elif device.device_kind == self.RC:
                 device.rc_counter = 0
                 device.outputs[None] = self.HIGH
@@ -381,7 +385,7 @@ class Devices:
             else:
                 self.make_clock(device_id, device_property)
                 error_type = self.NO_ERROR
-        
+
         elif device_kind == self.RC:
             # Device property is the RC time constant
             # (amount of cycles it stays 1)

@@ -14,7 +14,7 @@ from __future__ import annotations
 from parser_objects import ModuleDefinition, ModuleDevice, Signal
 from scanner import Symbol
 
-# TYPE Aliases for complicated return types 
+# TYPE Aliases for complicated return types
 from typing import Union
 DeviceKindResult = tuple[str, int, Union[int, str, None]]
 DeviceStatementResult = tuple[Symbol, DeviceKindResult, list[Symbol]]
@@ -269,7 +269,8 @@ class Parser:
             self.recent_names.append(self.symbol)
             self.recent_names = self.recent_names[-10:]
 
-    def _synchronize(self, stopping_types: list[int | str] | None = None, consume_semicolon: bool = True) -> None:
+    def _synchronize(self, stopping_types: list[int | str] | None = None,
+                     consume_semicolon: bool = True) -> None:
         """Advance scanner until stopping symbol or EOF is reached for error recovery.
 
         Optional arguments:
@@ -392,7 +393,8 @@ class Parser:
         )
         print("structural error(s) in file.")
 
-    def _warning(self, warningmsg: str, symbol: Symbol | None = None, hide_location: bool = False) -> None:
+    def _warning(self, warningmsg: str, symbol: Symbol | None = None,
+                 hide_location: bool = False) -> None:
         """Print a descriptive warning message without incrementing error_count.
 
         Arguments:
@@ -404,7 +406,7 @@ class Parser:
         hide_location -- if True, suppress the line and column display.
 
         Effects:
-        Increments warning_count and prints the warning message. 
+        Increments warning_count and prints the warning message.
         Does not prevent network building.
         """
         if symbol is None:
@@ -602,7 +604,8 @@ class Parser:
 
         return ""
 
-    def _name_typo_hint(self, bad_name_id: int | None, candidate_ids: set[int] | list[int], candidate_description: str) -> str:
+    def _name_typo_hint(self, bad_name_id: int | None, candidate_ids: set[int] | list[int],
+                        candidate_description: str) -> str:
         """Return a did-you-mean hint for a possible name typo.
 
         Arguments:
@@ -652,7 +655,8 @@ class Parser:
             )
         return hint
 
-    def _module_signal_name_typo_hint(self, bad_name_id: int | None, module_definition: ModuleDefinition) -> str:
+    def _module_signal_name_typo_hint(self, bad_name_id: int | None,
+                                      module_definition: ModuleDefinition) -> str:
         """Return a did-you-mean hint for a signal inside a module.
 
         Arguments:
@@ -751,12 +755,13 @@ class Parser:
     # EBNF PARSING: BASIC EBNF RULES
     #############################################################################################
 
-    def _parse_name(self, context_is_name_list: bool = False, expected_name: str | None = None) -> Symbol | None:
+    def _parse_name(self, context_is_name_list: bool = False,
+                    expected_name: str | None = None) -> Symbol | None:
         """Parse a NAME symbol and return its Symbol object.
 
         Optional arguments:
         context_is_name_list -- if True, this means we are parsing the name as part
-        of a name list. This means a few things: we SHOULD consume a reserved keyword 
+        of a name list. This means a few things: we SHOULD consume a reserved keyword
         when one is found where a name was expected, to allow for recovery in lists.
         It also means parse_name_list can deal with the semicolon so we should not sync pass it.
         expected_name -- description of the expected name, used only to improve the
@@ -809,8 +814,9 @@ class Parser:
                 self._synchronize(
                     [self.scanner.COMMA, self.scanner.SEMICOLON, self.scanner.EOF]
                     + self.section_keyword_strings,
-                    consume_semicolon=False # Synchronize but don't consume the semicolon
-                                            # to avoid extraneous second error
+                    consume_semicolon=False
+                    # Synchronize but don't consume the semicolon
+                    # to avoid extraneous second error
                 )
             else:
                 self._error(errormsg, bad_symbol, synchronize=True)
@@ -1005,7 +1011,7 @@ class Parser:
 
         Any name is assumed to be a module type. Checks for whether the module exists
         is now done later in _check_module_dependencies, to allow modules to be defined
-        out-of-order, or in _parse_device for top level modules. 
+        out-of-order, or in _parse_device for top level modules.
 
         Effects:
         Consumes the device kind and any parameter if successful. On error, prints an
@@ -1047,23 +1053,23 @@ class Parser:
                 device_parameter = self.symbol.raw_text
                 # for SIGGEN we store it as a string so leading 0s are kept
             else:
-                device_parameter = self.symbol.id            
-                    
+                device_parameter = self.symbol.id
+
             self._advance()  # consume the parameter
 
             if device_kind_id in [self.devices.CLOCK, self.devices.RC] and device_parameter < 1:
                 self._error("Invalid device parameter: should be 1 or greater",
-                        parameter_symbol, synchronize=True)
+                            parameter_symbol, synchronize=True)
                 return None
             if device_kind_id in self.devices.gate_types and not 1 <= device_parameter <= 16:
                 self._error("Invalid device parameter: should be between 1 and 16",
-                        parameter_symbol, synchronize=True)
+                            parameter_symbol, synchronize=True)
                 return None
             if device_kind_id == self.devices.SWITCH and device_parameter not in [0, 1]:
                 self._error("Invalid device parameter: should be 0 or 1",
-                        parameter_symbol, synchronize=True)
+                            parameter_symbol, synchronize=True)
                 return None
-                
+
             if device_kind_id == self.devices.SIGGEN:
                 siggen_param_ok = True
                 if device_parameter is None:
@@ -1075,10 +1081,9 @@ class Parser:
                         siggen_param_ok = False
                 if not siggen_param_ok:
                     self._error("Invalid SIGGEN parameter: "
-                            "should be a binary pattern containing only 0 and 1",
-                            parameter_symbol,
-                            synchronize=True,
-                    )
+                                "should be a binary pattern containing only 0 and 1",
+                                parameter_symbol,
+                                synchronize=True)
                     return None
 
             if self.symbol.type != self.scanner.R_BRACKET:
@@ -1106,7 +1111,7 @@ class Parser:
             errormsg += "This should be done in the CONNECT section."
             errormsg += self._section_typo_hint("CONNECT")
 
-        self._error(errormsg, synchronize=True)        
+        self._error(errormsg, synchronize=True)
         return None
 
     def _parse_device_statement(self) -> DeviceStatementResult | None | bool:
@@ -1823,7 +1828,8 @@ class Parser:
             and signal.port_id is None
         )
 
-    def _module_net_used_with_port(self, signal: Signal, module_definition: ModuleDefinition) -> bool:
+    def _module_net_used_with_port(self, signal: Signal,
+                                   module_definition: ModuleDefinition) -> bool:
         """Return True if signal uses a declared module net with a port."""
         return (
             not signal.is_literal
@@ -1856,7 +1862,8 @@ class Parser:
             signal, module_definition
         ) or self._is_module_output_port(signal, module_definition)
 
-    def _module_port_used_with_port(self, signal: Signal, module_definition: ModuleDefinition) -> bool:
+    def _module_port_used_with_port(self, signal: Signal,
+                                    module_definition: ModuleDefinition) -> bool:
         """Return True if signal uses module port name illegaly with an extra port."""
         return (
             not signal.is_literal
@@ -2101,7 +2108,7 @@ class Parser:
         error_count, flatten module net drivers, and discard invalid module definitions.
 
         Restrictions:
-        Should be called with self.symbol pointing at the MODULE keyword. 
+        Should be called with self.symbol pointing at the MODULE keyword.
         """
         # We want to store the ModuleDefinition only if the module
         # has no errors. Hence we store the error_count at the start
@@ -2278,21 +2285,21 @@ class Parser:
             and signal.port_id is not None
             and (signal.main_id, signal.port_id) in self.module_instance_ports
         )
-    
+
     def _check_module_dependencies(self) -> None:
         """Check that all module types in module definitions exist and dependencies are acyclic.
 
-        Returns None. 
-        
+        Returns None.
+
         Effects: Raises errors and increments self.error_count if a module type doesn't
-        exist or if a cycle is found. 
+        exist or if a cycle is found.
         """
-        ## Stage 1; Go through all module instantiations, check that their 
-        #  instantiated sub-modules are all valid/defined, and build a graph
+        # Stage 1; Go through all module instantiations, check that their
+        # instantiated sub-modules are all valid/defined, and build a graph
 
         no_undefined_modules = True
-        
-        # Adjacenty list module_name_string -> 
+
+        # Adjacenty list module_name_string ->
         # list of tuples (refernced module_name_string, symbol_to_report)
         graph = {}
 
@@ -2322,7 +2329,7 @@ class Parser:
         if not no_undefined_modules:
             return
 
-        ## Stage 2: Run DFS to detect cyclic definition dependencies
+        # Stage 2: Run DFS to detect cyclic definition dependencies
 
         visited = set()
 
@@ -2356,7 +2363,8 @@ class Parser:
                     return
         return
 
-    def _instantiate_module(self, instance_symbol: Symbol, module_name_id: int, instance_id: int, depth: int = 0) -> bool:
+    def _instantiate_module(self, instance_symbol: Symbol, module_name_id: int,
+                            instance_id: int, depth: int = 0) -> bool:
         """Instantiate a stored module definition into the top-level network.
 
         Return True if the module instance is expanded successfully, or False if an
@@ -3053,7 +3061,7 @@ class Parser:
     def _check_combinational_loops(self) -> None:
         """Detect combinational loops using BFS after nets and modules are flattened.
 
-        Create a warning if a combinational loop is found. 
+        Create a warning if a combinational loop is found.
 
         Effects:
         Builds a temporary graph from pending_connections and net_driver_dict. If a
@@ -3154,7 +3162,7 @@ class Parser:
         Effects:
         If network building is still allowed, checks module instance inputs, flattens
         net drivers, resolves literals into artificial SWITCH devices,
-        calls network.make_connection for each pending connection, 
+        calls network.make_connection for each pending connection,
         checks for combinational loops and issues a warning if any is found, and
         checks all device inputs are driven. May print errors and increment error_count.
 
@@ -3167,7 +3175,6 @@ class Parser:
 
         if not self._flatten_net_driver_dict():
             return
-
 
         # TODO net unused / not connected to anything checks
         # may want to keep track of the net instantiation symbols for this
@@ -3263,7 +3270,7 @@ class Parser:
                 break
 
         if self._can_build_network():
-            # Per feedback in interim session, is now a warning rather than error. 
+            # Per feedback in interim session, is now a warning rather than error.
             self._check_combinational_loops()
         self._check_all_device_inputs_driven()  # generate an error if not
 

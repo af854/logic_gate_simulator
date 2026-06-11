@@ -12,7 +12,15 @@ class Signal:
     symbol for I1. It can also represent a net, a module port, or a literal.
     """
 
-    def __init__(self, main_symbol=None, port_symbol=None, is_literal=False, literal_value = None, main_id = None, port_id = None):
+    def __init__(
+        self,
+        main_symbol=None,
+        port_symbol=None,
+        is_literal=False,
+        literal_value=None,
+        main_id=None,
+        port_id=None,
+    ):
         """Initialise a Signal object.
 
         Optional keyword arguments:
@@ -26,7 +34,7 @@ class Signal:
         port_id -- internal port ID to use instead of port_symbol.id.
 
         """
-        self.main_symbol = main_symbol # The name of the device or net like ANDGATE1
+        self.main_symbol = main_symbol  # The name of the device or net like ANDGATE1
         self.port_symbol = port_symbol
         self.is_literal = is_literal
         self.literal_value = literal_value
@@ -40,7 +48,7 @@ class Signal:
         # in the module instantiation, but the main_id will be, for example,
         # MODULE_INSTANCE_NAME->DEVICE_NAME, the internal device name used to keep track of
         # different module instances' devices. (since MODULE_INSTANCE_NAME->DEVICE_NAME)
-        # is not actually written in the code anywhere. 
+        # is not actually written in the code anywhere.
 
         if main_id is None and main_symbol is not None:
             self.main_id = main_symbol.id
@@ -51,6 +59,7 @@ class Signal:
         else:
             self.port_id = port_id
 
+
 class ModuleDevice:
     """Store one device declared inside a module definition.
 
@@ -58,7 +67,7 @@ class ModuleDevice:
     or an instantiation of another user-defined module.
     """
 
-    def __init__(self, symbol, kind_type, kind_name, parameter_value, kind_symbol = None):
+    def __init__(self, symbol, kind_type, kind_name, parameter_value, kind_symbol=None):
         """Initialise a ModuleDevice object.
 
         Arguments:
@@ -67,13 +76,14 @@ class ModuleDevice:
         kind_name -- name ID of the primitive device or module being instantiated.
         parameter_value -- integer parameter value for parameterised primitive
             devices, or None if no parameter is used.
-        kind_symbol -- Symbol object for device kind or module type 
+        kind_symbol -- Symbol object for device kind or module type
         """
         self.symbol = symbol
-        self.kind_type = kind_type      # "primitive" or "module"
-        self.kind_name = kind_name      # e.g. ID for "AND" or another module name
+        self.kind_type = kind_type  # "primitive" or "module"
+        self.kind_name = kind_name  # e.g. ID for "AND" or another module name
         self.parameter_value = parameter_value
         self.kind_symbol = kind_symbol
+
 
 class ModuleDefinition:
     """Store all parser information for one module definition.
@@ -100,9 +110,9 @@ class ModuleDefinition:
         self.input_symbols = input_symbols
         self.output_symbols = output_symbols
 
-        self.devices = [] # list of Devices
+        self.devices = []  # list of Devices
 
-        self.net_driver_dict = {} # dict from net_id to its driving signal
+        self.net_driver_dict = {}  # dict from net_id to its driving signal
 
         # sets to keep track of ids of names - for easy duplicate detection
         self.input_ids = set()
@@ -115,4 +125,4 @@ class ModuleDefinition:
         for output_symbol in output_symbols:
             self.output_ids.add(output_symbol.id)
 
-        self.connections = [] # list of tuples of connection symbols (destination, driver) 
+        self.connections = []  # list of tuples of connection symbols (destination, driver)
