@@ -53,7 +53,7 @@ msgid "Reset view"
 msgstr "إعادة ضبط العرض"
 
 msgid "{module_name} internals"
-msgstr "الإشارات الداخلية لـ {module_name}"
+msgstr "داخل {module_name}"
 
 msgid "Show cycle inspector"
 msgstr "إظهار فاحص الدورات"
