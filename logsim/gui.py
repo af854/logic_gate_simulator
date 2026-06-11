@@ -435,6 +435,10 @@ class MyGLCanvas(wxcanvas.GLCanvas):
             -1,
             attribList=active_attribs,
         )
+
+        if hasattr(self, "SetLayoutDirection"):
+            self.SetLayoutDirection(wx.Layout_LeftToRight)
+
         _initialise_glut_once()
         self.init = False
         self.context = wxcanvas.GLContext(self)
@@ -2855,6 +2859,9 @@ class Gui(wx.Frame):
             self.canvas_3d = None
             new_canvas = self.canvas_2d
             message = _("Switched to 2D view")
+
+        if hasattr(new_canvas, "SetLayoutDirection"):
+            new_canvas.SetLayoutDirection(wx.Layout_LeftToRight)
 
         self.canvas_sizer.Insert(0, new_canvas, 1, wx.EXPAND)
         self.Layout()

@@ -262,6 +262,9 @@ class Canvas3D(wxcanvas.GLCanvas):
         # 4. Initialize the parent using the safe, verified attributes
         super().__init__(parent, -1, attribList=active_attribs)
 
+        if hasattr(self, "SetLayoutDirection"):
+            self.SetLayoutDirection(wx.Layout_LeftToRight)
+
         self.init = False
         self.context = wxcanvas.GLContext(self)
         self.devices = devices
